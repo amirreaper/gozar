@@ -226,7 +226,40 @@ def run_selfcheck(cfg: dict | None = None, fix: bool = False) -> int:
                         "install problem(s) found.")
     if rc != U.EXIT_OK:
         _how_to_repair(here)
+    _what_works(here)
     return rc
+
+
+def _what_works(here: Path) -> None:
+    """Name the spellings that provably work right now, on this machine.
+
+    The 2026-11-29 report was not a broken package: the venv had a working
+    `gozar` all along and a stale launcher in ~/.local/bin was shadowing it.
+    "Run this exact line" is a better answer than a diagnosis, so every
+    selfcheck ends with the lines that were just verified to work.
+    """
+    import subprocess
+    candidates = [[sys.executable, "-m", "gozar"]]
+    for script, shebang in find_launchers():
+        candidates.append([str(script)])
+    ok = []
+    for cmd in candidates:
+        try:
+            r = subprocess.run(cmd + ["--version"], capture_output=True,
+                               text=True, timeout=25)
+        except Exception:                                # noqa: BLE001
+            continue
+        if r.returncode == 0 and (r.stdout or "").strip():
+            ok.append(" ".join(cmd) + "   # " + (r.stdout or "").strip())
+    if not ok:
+        return
+    print("  " + U.bold("These work right now on this machine:"))
+    for line in ok:
+        print("      " + line)
+    print("  " + U.bold("To make plain `gozar` be one of them:"))
+    print("      " + sys.executable + " -m pip install --force-reinstall --user "
+          "git+https://github.com/amirreaper/gozar.git")
+    print()
 
 
 def _explain(script: Path, shebang: str, facts: dict) -> None:

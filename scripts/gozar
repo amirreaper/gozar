@@ -25,7 +25,7 @@ RESCUE = """\
   user site  : {usersite}  (enabled={enabled})
   gozar      : {found}
   reason     : {error}
-
+{pip_fact}
 Four things cause this, and they need different fixes:
 
   1. user site-packages is disabled for that python
@@ -43,6 +43,7 @@ Four things cause this, and they need different fixes:
   4. a leftover `gozar` directory (no __init__.py) shadows the real package
      -> find it:  {exe} -c "import importlib.util as u;print(u.find_spec('gozar'))"
 
+{found_block}
 The clean fix that avoids all four:
 
   python3 -m venv ~/.gozar
@@ -53,6 +54,22 @@ No clone, no install needed for the diagnosis:
   python3 scripts/gozar-rescue.py     (or curl the same file from the repo)
 """
 
+# Hunting for a working copy is the single most useful thing this script can do
+# after explaining the cause: on 2026-11-29 the user's venv already had a
+# perfectly good `gozar` and a stale launcher in ~/.local/bin was shadowing it.
+# Telling them "four things could be wrong" was correct and useless; naming the
+# command that already works takes one extra subprocess.
+WORKING = """\
+  WHAT TO TYPE INSTEAD — a working gozar was found on this machine:
+{rows}
+
+  Those use their own interpreter, so they are unaffected by the launcher above.
+  To make plain `gozar` work as well, delete or replace the broken one:
+      rm {broken}                 (pip undoes this cleanly: pip uninstall gozar)
+
+"""
+
+
 URL = "git+https://github.com/amirreaper/gozar.git"
 
 
@@ -60,6 +77,76 @@ HEAD_MISSING = "gozar: installed, but this launcher cannot import its own packag
 HEAD_BROKEN = ("gozar: the package is installed but incomplete — a module inside "
                "it is missing.\n   Reinstall it with the interpreter this "
                "launcher uses (below).")
+
+
+def _pip_fact():
+    """What does THIS interpreter's pip think about gozar? Two extra lines."""
+    import subprocess
+    try:
+        r = subprocess.run([sys.executable, "-m", "pip", "show", "gozar"],
+                           capture_output=True, text=True, timeout=30)
+    except Exception:                          # noqa: BLE001
+        return ""
+    if r.returncode != 0:
+        return ("  pip (that python) : says gozar is NOT installed here\n"
+                "                      -> this interpreter is not the one pip used\n")
+    loc = ver = ""
+    for line in (r.stdout or "").splitlines():
+        low = line.lower()
+        if low.startswith("location:"):
+            loc = line.split(":", 1)[1].strip()
+        elif low.startswith("version:"):
+            ver = line.split(":", 1)[1].strip()
+    out = f"  pip (that python) : gozar {ver} at {loc}\n"
+    try:
+        import site
+        paths = [p for p in sys.path if p.endswith("site-packages")]
+        same = any(str(loc) == str(p) for p in paths)
+        if same:
+            out += ("  -> pip put it exactly where python looks, so the package\n"
+                    "     directory itself is damaged: reinstall with --force-reinstall\n")
+        else:
+            out += ("  -> that directory is NOT on this python's sys.path:\n"
+                    + "".join(f"       looks in: {p}\n" for p in paths))
+    except Exception:                          # noqa: BLE001
+        pass
+    return out
+
+
+def _works(cmd):
+    """True if `cmd --version` prints a gozar version."""
+    import subprocess
+    try:
+        r = subprocess.run(list(cmd) + ["--version"], capture_output=True,
+                           text=True, timeout=25)
+    except Exception:                          # noqa: BLE001
+        return False
+    return r.returncode == 0 and "gozar" in (r.stdout or "")
+
+
+def _find_working(script):
+    """Every `gozar` that DOES work: $PATH, the active venv, `python -m gozar`."""
+    rows = []
+    me = os.path.abspath(script)
+    # a) other gozar scripts on PATH (this one first, so it never recommends itself)
+    for d in os.environ.get("PATH", "").split(os.pathsep):
+        cand = os.path.join(d or ".", "gozar")
+        if os.path.abspath(cand) == me or not os.access(cand, os.X_OK):
+            continue
+        rows.append([cand])
+    # b) the virtualenv this launcher was started from, if any
+    venv = os.environ.get("VIRTUAL_ENV") or ""
+    if venv:
+        cand = os.path.join(venv, "bin", "gozar")
+        if os.access(cand, os.X_OK) and os.path.abspath(cand) != me:
+            rows.append([cand])
+    # c) the interpreter itself, which is the most reliable spelling of all
+    rows.append([sys.executable, "-m", "gozar"])
+    out = []
+    for row in rows:
+        if _works(row):
+            out.append("      " + " ".join(row))
+    return out
 
 
 def _explain(exc):
@@ -82,7 +169,19 @@ def _explain(exc):
                                         "<import machinery is broken too>") \
         and not str(exc).startswith("ModuleNotFoundError: No module named 'gozar'") \
         else HEAD_MISSING
-    sys.stderr.write(RESCUE.format(head=head, script=os.path.abspath(__file__),
+    try:
+        working = _find_working(__file__)
+    except Exception:                          # noqa: BLE001
+        working = []
+    found_block = WORKING.format(rows="\n".join(working),
+                                 broken=os.path.abspath(__file__)) if working else ""
+    try:
+        pip_fact = _pip_fact()
+    except Exception:                          # noqa: BLE001
+        pip_fact = ""
+    sys.stderr.write(RESCUE.format(head=head, found_block=found_block,
+                                   pip_fact=pip_fact,
+                                   script=os.path.abspath(__file__),
                                    exe=sys.executable, usersite=usersite,
                                    enabled=enabled, found=found,
                                    error="%s: %s" % (type(exc).__name__, exc),

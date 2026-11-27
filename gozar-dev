@@ -1,16 +1,25 @@
 #!/usr/bin/env bash
-# Convenience launcher for gozar (development checkout).
-# Usage:  ./gozar-dev discover -t https://example.com -n 20
-#         ./gozar-dev run 10
-#         ./gozar-dev connect
+# gozar-dev — run gozar from a git checkout, without installing anything.
 #
-# Works even if this script is symlinked/copied to another folder:
-#  1) symlinks are resolved to the real file,
-#  2) it walks UP from the script dir looking for the gozar package,
-#  3) or set GOZAR_HOME=/path/to/gozar-repo to point it anywhere.
+#   ./gozar-dev discover -t https://example.com -n 20
+#   ./gozar-dev selfcheck
+#   ./gozar-dev doctor
+#
+# Design rules, each one paid for by a bug:
+#   * the package is found by looking for the module it ACTUALLY runs
+#     (gozar/cli.py), not a hard-coded file name — v2.1.2 renamed bot.py to
+#     cli.py and this launcher kept asking for bot.py, so `./gozar-dev` said
+#     "gozar package not found" from inside the repo (reported 2026-11-29);
+#   * the module is run as `-m gozar`, not `-m gozar.<something>`, for the same
+#     reason: the entry point is a fact about the package, not about a file;
+#   * upward search stops at the first directory that holds the package, so a
+#     subdirectory of the repo works too;
+#   * GOZAR_HOME wins over everything, and there is no second, misspelled
+#     variable to also honour (PROXYFINDER_HOME was a leftover);
+#   * a usable venv is preferred, but a venv without aiohttp is worse than no
+#     venv, so it falls back and says so.
 set -euo pipefail
 
-# Resolve symlinks (GNU readlink -f, fallback to python os.path.realpath)
 resolve_self() {
   if command -v readlink >/dev/null 2>&1 && readlink -f "$0" >/dev/null 2>&1; then
     readlink -f "$0"
@@ -21,48 +30,63 @@ print(os.path.realpath(sys.argv[1]))
 PY
   fi
 }
+
 SELF="$(resolve_self)"
 SELF_DIR="$(cd "$(dirname "$SELF")" && pwd)"
 
+# the module gozar actually exposes; keep this in step with pyproject/scripts
+ENTRY="gozar/cli.py"
+
 find_pkg_root() {
-  # Upward search from the real script location
-  local d="$1"
-  while [ "$d" != "/" ]; do
-    if [ -f "$d/gozar/bot.py" ]; then
-      echo "$d"
-      return 0
+  local d
+  # 1) explicit override
+  if [ -n "${GOZAR_HOME:-}" ]; then
+    if [ -f "${GOZAR_HOME%/}/$ENTRY" ]; then
+      echo "${GOZAR_HOME%/}"; return 0
+    fi
+    # warn, then keep searching: a bad GOZAR_HOME should not hide a good
+    # checkout that is right here
+    echo "gozar-dev: WARNING — GOZAR_HOME=$GOZAR_HOME has no $ENTRY; ignoring it" >&2
+  fi
+  # 2) upward from the real script location
+  d="$1"
+  while [ "$d" != "/" ] && [ -n "$d" ]; do
+    if [ -f "$d/$ENTRY" ]; then
+      echo "$d"; return 0
     fi
     d="$(dirname "$d")"
   done
-  # Explicit env override
-  if [ -n "${PROXYFINDER_HOME:-}" ] && [ -f "${GOZAR_HOME%/}/gozar/bot.py" ]; then
-    echo "${PROXYFINDER_HOME%/}"
-    return 0
-  fi
+  # 3) the current directory, in case the script was invoked from elsewhere
+  if [ -f "$PWD/$ENTRY" ]; then echo "$PWD"; return 0; fi
   return 1
 }
 
 if ! ROOT="$(find_pkg_root "$SELF_DIR")"; then
   cat >&2 <<EOF
-ERROR: gozar package not found.
+gozar-dev: no gozar checkout found.
 
-Put this script inside (or symlink it into) the gozar repo, or point
-it at the repo explicitly:
+  looked for : $ENTRY
+  started at : $SELF_DIR
+  (upwards to /, then \$PWD, then \$GOZAR_HOME)
+
+If you are inside a checkout, the package directory is missing or incomplete —
+re-clone it, or point at it explicitly:
 
   export GOZAR_HOME=/path/to/gozar
-  ./gozar-dev $*
+  $SELF --version
 
+If you installed with pip instead, you do not need this script:
+
+  gozar --version        # the installed command
+  gozar selfcheck        # if it cannot import itself
 EOF
-  exit 1
+  exit 2
 fi
 
 cd "$ROOT"
 
-# ── environment discovery ────────────────────────────────────────────────
-# People keep the venv in different places. Order matters: an explicit
-# VIRTUAL_ENV / GOZAR_VENV always wins, then the project-local .venv, then
-# $HOME/.venv and $HOME/venv. We only activate a venv that actually has
-# python in it, and we never fail the launcher because of a broken venv.
+# ── pick an interpreter ─────────────────────────────────────────────────────
+# Order: explicit override, the active venv, then the usual per-project places.
 pick_venv() {
   local cand
   for cand in \
@@ -72,45 +96,44 @@ pick_venv() {
       "$HOME/.venv" "$HOME/venv" \
       "$HOME/.local/share/virtualenvs"/* ; do
     [ -n "$cand" ] || continue
-    if [ -x "$cand/bin/python" ] || [ -x "$cand/bin/python3" ]; then
+    [ -d "$cand" ] || continue
+    if [ -x "$cand/bin/python3" ] || [ -x "$cand/bin/python" ]; then
       echo "$cand"; return 0
     fi
   done
   return 1
 }
 
+PY="python3"
 if VENV_DIR="$(pick_venv)"; then
-  # shellcheck disable=SC1091
-  source "$VENV_DIR/bin/activate"
-  # make sure high-concurrency async I/O has the epoll loop
-  case "${VENV_DIR}" in
-    *virtualenvs*) : ;;
-  esac
-  # A venv without the deps is worse than no venv: verify, then fall back.
-  if ! python3 -c "import aiohttp" >/dev/null 2>&1; then
-    echo "gozar: WARNING — $VENV_DIR has no aiohttp; falling back to system python3" >&2
-    echo "        fix it with:  $VENV_DIR/bin/pip install -r requirements.txt" >&2
-    deactivate 2>/dev/null || true
+  if [ -x "$VENV_DIR/bin/python3" ]; then
+    PY="$VENV_DIR/bin/python3"
   else
-    echo "gozar: using venv $VENV_DIR" >&2
+    PY="$VENV_DIR/bin/python"
   fi
-else
-  echo "gozar: no venv found (looked at VIRTUAL_ENV, GOZAR_VENV, ./.venv, ./venv, ~/.venv, ~/venv)" >&2
+  if "$PY" -c "import aiohttp" >/dev/null 2>&1; then
+    echo "gozar-dev: venv $VENV_DIR" >&2
+  else
+    echo "gozar-dev: WARNING — $VENV_DIR has no aiohttp; using system python3" >&2
+    echo "           fix:  $VENV_DIR/bin/pip install -r requirements.txt" >&2
+    PY="python3"
+  fi
 fi
 
-# last resort: give a copy-pasteable fix instead of a bare ImportError
-if ! python3 -c "import aiohttp" >/dev/null 2>&1; then
+if ! "$PY" -c "import aiohttp" >/dev/null 2>&1; then
   cat >&2 <<'EOF'
-gozar: ERROR — python package 'aiohttp' is missing.
-        install it with one of:
-          python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
-          pip install --user -r requirements.txt
-          bash install.sh
+gozar-dev: python package 'aiohttp' is missing.
+
+  python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+  pip install --user -r requirements.txt
+  bash install.sh --venv
 EOF
-  exit 1
+  exit 2
 fi
 
-# Raise file descriptor limit for high concurrency (best effort)
+# high-concurrency async I/O wants a bigger fd table; failure is not fatal
 ulimit -n 4096 2>/dev/null || true
 
-exec python3 -m gozar.bot "$@"
+# `-m gozar`: the package's own __main__, which imports gozar.cli. Running a
+# module path here would put the entry point's name in two places again.
+exec "$PY" -m gozar "$@"

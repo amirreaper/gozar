@@ -298,7 +298,8 @@ def t_env_and_sources() -> None:
     launcher = (ROOT / "gozar-dev").read_text()
     for cand in ("GOZAR_VENV", "VIRTUAL_ENV", "$HOME/.venv", "$HOME/venv", "$ROOT/.venv"):
         check(f"the launcher looks for {cand}", cand in launcher)
-    check("a broken venv does not crash", "falling back to system python3" in launcher)
+    check("a broken venv does not crash and says so",
+          "no aiohttp" in launcher and "using system python3" in launcher)
 
     from gozar import core_sources as S
     urls = set(sum(S.TIERS.values(), [])) | {u for v in S.PROTOCOL_SOURCES.values() for u in v}
@@ -397,6 +398,71 @@ def t_install_integrity() -> None:
         check("a broken install explains itself instead of printing a traceback",
               "cannot import its own package" in out)
         check("and it exits 2 (cannot run), not 1 (crash)", r.returncode == 2)
+
+
+# ─────────────── 34) the dev launcher must follow the package ───────────────
+def t_dev_launcher() -> None:
+    """v2.1.2 renamed bot.py -> cli.py and gozar-dev kept looking for bot.py.
+
+    Result: `./gozar-dev` printed "gozar package not found" from inside the
+    repo (reported 2026-11-29, with `ls` next to it showing gozar/ present).
+    A launcher that hard-codes a module name will always drift, so the checks
+    below tie it to the file that actually exists.
+    """
+    print("\n34) gozar-dev finds the package it is sitting inside")
+    import subprocess, sys
+    text = (ROOT / "gozar-dev").read_text()
+
+    check("it runs the package, not a module path inside it",
+          '-m gozar "' in text or '-m gozar $' in text or "exec \"$PY\" -m gozar" in text)
+    code = "\n".join(ln for ln in text.splitlines()
+                     if not ln.lstrip().startswith("#"))
+    check("its CODE does not name the old bot module", "bot.py" not in code)
+    check("it does not run gozar.bot", "gozar.bot" not in code)
+    check("the leftover PROXYFINDER_HOME variable is gone",
+          "PROXYFINDER_HOME" not in code)
+    check("GOZAR_HOME is honoured", "GOZAR_HOME" in text)
+
+    # the file it looks for must exist, or the launcher is unusable
+    import re
+    m = re.search(r'ENTRY="([^"]+)"', text)
+    check("it declares which file marks a checkout", bool(m))
+    if m:
+        check(f"that file exists in the package ({m.group(1)})",
+              (ROOT / m.group(1)).exists())
+
+    # and it must actually run, from the repo root and from a subdirectory
+    r = subprocess.run([str(ROOT / "gozar-dev"), "--version"], capture_output=True,
+                       text=True, timeout=120, cwd=str(ROOT))
+    check("`./gozar-dev --version` works from the repo root",
+          r.returncode == 0 and "gozar" in (r.stdout + r.stderr))
+    r2 = subprocess.run([str(ROOT / "gozar-dev"), "--version"], capture_output=True,
+                        text=True, timeout=120, cwd=str(ROOT / "gozar"))
+    check("and from a subdirectory", r2.returncode == 0)
+    check("a missing checkout exits 2 with a readable message",
+          "no gozar checkout found" in text)
+
+
+# ─────────────── 35) the broken-install message must be actionable ─────────────
+def t_broken_install_message() -> None:
+    """On 2026-11-29 the launcher explained four causes and stopped there.
+
+    The user's venv already had a working `gozar`; a stale launcher in
+    ~/.local/bin was shadowing it. "Four things could be wrong" was correct and
+    useless. The message now also names the command that works, and asks that
+    interpreter's own pip what it thinks.
+    """
+    print("\n35) a broken launcher names a working command, not just causes")
+    src = (ROOT / "scripts" / "gozar").read_text()
+    check("it searches for a gozar that does work",
+          "def _find_working" in src and "_works(" in src)
+    check("it offers `python -m gozar` as the always-true spelling",
+          '"-m", "gozar"' in src)
+    check("it never recommends the broken launcher to itself", "== me" in src)
+    check("it asks that interpreter's pip where gozar is",
+          "def _pip_fact" in src and "pip" in src and "show" in src)
+    check("it distinguishes 'pip never installed here' from 'files are damaged'",
+          "not the one pip used" in src and "directory itself is damaged" in src)
 
 
 # ─────────────── 33) completions are generated, and current ───────────────
@@ -1416,6 +1482,8 @@ def main() -> int:
     t_release_workflow()
     t_install_integrity()
     t_completions()
+    t_dev_launcher()
+    t_broken_install_message()
     print("\n" + "=" * 70)
     print(f"  PASS: {len(PASSES)}   FAIL: {len(FAILS)}")
     for f in FAILS:

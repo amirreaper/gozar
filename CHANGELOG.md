@@ -1,5 +1,49 @@
 # تغییرات — gozar (سابقاً rahyab)
 
+## v2.1.3 — ۲۰۲۶-۱۱-۳۰ · `gozar-dev` و لانچر
+
+**۱) باگ من بود: `./gozar-dev` داخل ریپو می‌گفت «gozar package not found».**
+در v2.1.2 فایل `bot.py` را به `cli.py` تغییر نام دادم و `gozar-dev` را جا
+گذاشتم — اسکریپت هنوز دنبال `gozar/bot.py` می‌گشت. سه مشکل در همان فایل:
+
+| مشکل | حالا |
+|---|---|
+| مسیر hard-code شده به `gozar/bot.py` | فایل نشانه در یک جا اعلام می‌شود (`ENTRY="gozar/cli.py"`) و تست وجودش را چک می‌کند |
+| `python3 -m gozar.bot` | `python3 -m gozar` — نقطهٔ ورود یک واقعیتِ پکیج است، نه اسم فایل |
+| `${PROXYFINDER_HOME}` (متغیر غلط‌املایی‌شدهٔ باقی‌مانده) | فقط `GOZAR_HOME` |
+
+تست‌شده از ریشهٔ ریپو، از زیرپوشه، از طریق سیم‌لینک، با `GOZAR_HOME`، و
+`GOZAR_HOME` خراب (هشدار می‌دهد و همان چک‌اوت کنار دست را پیدا می‌کند).
+
+**۲) پیام لانچر حالا «چه تایپ کنم» را می‌گوید، نه فقط «چهار علت».**
+در گزارش شما، venv یک `gozar` سالم داشت و یک لانچر کهنه در `~/.local/bin`
+جلویش را گرفته بود. چهار علت گفتن درست بود و بی‌فایده. حالا لانچر:
+
+- تمام `gozar`های روی `PATH`، venv فعال، و `python -m gozar` را **اجرا**
+  می‌کند و آن‌هایی که جواب می‌دهند را چاپ می‌کند:
+  ```
+  WHAT TO TYPE INSTEAD — a working gozar was found on this machine:
+      /home/amir/.venv/bin/gozar
+  ```
+- از **pip همان مفسر** می‌پرسد کجاست، و دو حالت را از هم جدا می‌کند:
+  ```
+  pip (that python) : says gozar is NOT installed here
+                      -> this interpreter is not the one pip used
+  ```
+  یا
+  ```
+  pip (that python) : gozar 2.1.3 at /home/amir/.venv/lib/python3.13/site-packages
+  -> pip put it exactly where python looks, so the package
+     directory itself is damaged: reinstall with --force-reinstall
+  ```
+
+**۳) `gozar selfcheck` با «چه چیزی الان کار می‌کند» تمام می‌شود.** هر اجرا با
+فهرست دستورهایی تمام می‌شود که همین حالا روی همین سیستم تست و تأیید شده‌اند.
+
+**۴) تست‌ها: ۳۲۷ قرارداد، ۰ خطا** — گروه‌های ۳۴ و ۳۵ قفل می‌کنند که لانچر
+دوباره به اسم فایل گره نخورد، و پیام نصب شکسته حتماً یک دستور قابل‌اجرا بدهد.
+
+
 ## v2.1.2 — ۲۰۲۶-۱۱-۲۹ · نصب دیگر بی‌صدا خراب نمی‌شود
 
 **گزارش:** `Successfully installed gozar-2.1.1` و بعد:
