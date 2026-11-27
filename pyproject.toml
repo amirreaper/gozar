@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gozar"
+version = "2.0.0"
+description = "Find, test and keep a working pool of free public proxy configs, then connect through the best of them."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+keywords = ["proxy", "vless", "hysteria2", "shadowsocks", "sing-box", "connectivity", "network"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Environment :: Console",
+  "Intended Audience :: End users/Desktop",
+  "Operating System :: POSIX :: Linux",
+  "Operating System :: MacOS",
+  "Programming Language :: Python :: 3",
+  "Topic :: Internet :: Proxy Servers",
+  "Topic :: System :: Networking",
+]
+dependencies = [
+  "aiohttp>=3.9",
+  "aiohttp-socks>=0.8",
+]
+
+[project.optional-dependencies]
+dev = ["setuptools>=68", "build"]
+
+[project.scripts]
+gozar = "gozar.bot:cli"
+
+[project.urls]
+Homepage = "https://github.com/YOURNAME/gozar"
+Repository = "https://github.com/YOURNAME/gozar"
+
+[tool.setuptools]
+packages = ["gozar"]
+
+[tool.setuptools.package-data]
+gozar = ["py.typed"]

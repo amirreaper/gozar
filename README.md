@@ -1,0 +1,348 @@
+# gozar — public-open-proxy finder, verifier, personal gateway
+
+Finds free public configs (vless/hy2/tuic/trojan/vmess/ss) from **tiered,
+pre-tested GitHub sources**, verifies them **against YOUR real targets**
+through sing-box, ranks them in a persistent state, and connects you via a
+local proxy or a full TUN.
+
+Built for weak / censored lines: cheap TCP probes before every
+expensive sing-box test, per-tier cascade (stop early when enough), adaptive
+latency thresholds derived from *your* baseline ping.
+
+> Older HTTP/SOCKS4/SOCKS5 "proxy list" generation was removed in fd99e6f →
+> a62cfed (see git history).
+
+## Layout
+
+```
+proxyfinder/
+├── bot                     # bash launcher (ulimit, venv, exec)
+├── install.sh              # installs sing-box + venv (arch-detect)
+├── config.json             # user overrides (defaults live in proxyfinder/config.py)
+├── requirements.txt        # aiohttp + aiohttp-socks (vendored under vendor/)
+├── completions/bot.fish    # fish completions
+├── docs/archive/DEFECTS.md         # defect report & fix status
+└── proxyfinder/            # the python package
+    ├── bot.py              # CLI: discover/check/loop/run/connect/list/status/verify/doctor/pick/drop
+    ├── config.py           # DEFAULTS + load_config
+    ├── core_sources.py     # TRUSTED/GOOD/MEDIUM tiers + mirrors_for
+    ├── core_parser.py      # link → config dict (vless/vmess/trojan/ss/hy2/tuic/anytls)
+    ├── core_runner.py      # sing-box instance(s) + real fetch + exit-IP tunnel proof
+    ├── core_test.py        # cascade discover + check, adaptive thresholds
+    ├── core_store.py       # state.json: upsert/score/prune + best/bak/gen selectors + freshness
+    ├── core_output.py      # best/bak/gen .txt+.json+.summary.txt + sing-box group build
+    ├── core_connect.py     # urltest group connect (nodes engine)
+    ├── core_live.py        # live status board for a running tunnel
+    ├── core_score.py       # source scoring against one target
+    ├── thresholds.py       # adaptive fast/keep ceilings from your baseline
+    ├── ui_pick.py          # interactive picker — curses TUI / stdin menu fallback
+    ├── doctor.py           # self-diagnostics incl. direct target probe
+    ├── engines.py          # where the sing-box binary is searched
+    └── checker.py          # tcp_ping, udp_quic_ping, baseline, classify, exit-IP proof utils
+```
+
+## Install & prerequisites
+
+```bash
+bash install.sh            # downloads sing-box for your arch, creates .venv
+python -m proxyfinder doctor --help
+```
+
+NixOS / anything with nix:
+
+```bash
+nix-shell -p python3 python3Packages.aiohttp python3Packages.aiohttp-socks curl
+# sing-box is auto-detected from ./engines, ~/.local/bin, or PATH:
+#   nix-shell -p sing-box   (or: bash install.sh pulls the release binary)
+```
+
+**sing-box compatibility:** the bot auto-detects the sing-box version and
+emits the config shape it needs (`endpoints` for ≥1.13, legacy `outbounds`
+form for older builds like nixpkgs-stable), with a validate-and-fallback
+pass. No sudo is needed in proxy mode on any version; `--mode tun` is the
+only path that wants root.
+
+## Quick start
+
+```bash
+gozar doctor                          # env + sources + baseline + targets
+gozar discover -t https://example.com/ -t https://www.gstatic.com/generate_204 -n 30
+gozar run 5                           # find 5, verify, interactive picker, connect
+gozar pick                            # live table: id, proto, latency, stability
+                                      #   Enter=connect  d=drop  r=re-ping
+                                      #   c=mass re-check + resort  f=list filter (all/fast/backup)  q=quit
+gozar pick --from best                # start with only the best list visible
+gozar drop 26e0e391                   # delete node by short id or list index
+gozar check --drop-dead               # live re-check, purge this-round failures immediately
+gozar connect                         # urltest group over best nodes (proxy on :2080)
+gozar status                          # stats & current config summary
+gozar list                            # best/bak/gen with short ids
+gozar verify -n 10 --from all         # PROOF: did traffic really cross the node?
+gozar verify --port 2080              # verify the live local proxy (connect mode)
+```
+
+### Multi-target
+
+`-t URL` is repeatable; a node only counts as `target_ok` when **all** targets
+pass (latency + real fetch + CF/poson detection). Config file equivalent:
+
+```json
+"targets": ["https://example.com/", "https://www.gstatic.com/generate_204"]
+```
+
+## How it decides (6 stages)
+
+1. **fetch** — tier-by-tier (trusted → good → medium), stops early once enough
+2. **probe** — TCP ping per candidate (400-way); QUIC/UDP protos get a real RFC 9000
+   Version-Negotiation probe instead of being killed by a TCP-only check
+3. **sing-box test** — real echo through the candidate, up to 6 nodes per process
+4. **tunnel proof** — the public exit IP is read *through* the tunnel and compared
+   with your own line IP; equal ⇒ `leak` ⇒ node rejected
+5. **target check** — real fetch of *your* target(s) with full browser headers;
+   CF-block/challenge filtered
+6. **persist & rank** — state.json with success/fail/success-rate/avg latency and
+   per-check freshness (`last_check`, `alive_now`, `last_result`), adaptive
+   fast/bak thresholds from *your* baseline ping
+
+## Architecture guarantees
+
+- **a 2xx answer is never trusted as proof of tunneling** — exit-IP verification is on
+  by default (`--strict-exit` to also reject nodes whose exit IP cannot be read)
+- atomic state writes (tmp + rename) plus **incremental real-time persistence**: every
+  node is written to `state.json` / `best.txt` / `bak.txt` / `gen.txt` the moment it is
+  tested, and Ctrl+C saves everything found so far (second Ctrl+C force-quits)
+- prune on consecutive failures / last-ok age
+- unreachable sources are **named**, never fatal (filtered networks reality)
+- third-party passthrough proxies intentionally excluded (mirror injection)
+- CLI exit codes: 0 ok, 2 usage/no-data, 3 verification failed
+
+## Daily workflow (3 short rituals)
+
+```bash
+gozar discover -t https://example.com/ -n 20   # 1) hunt + test (2-4 min)
+gozar check                                    # 2) re-check the pool, prune dead
+gozar connect                                  # 3) local proxy on your best nodes :2080
+```
+Pool dry (`best < 5`)? Re-hunt, or ask what your line can actually do:
+```bash
+gozar discover -t https://example.com/ -n 30 --hard
+gozar calibrate                # measure your line, propose the ceilings
+```
+
+## Golden nodes ⭐ — the manual "might come back" pool
+
+Good public nodes usually die within hours, but some are real keys that
+revive after a few days. `gozar pick` lets you pin them:
+
+- press `g` on any row (text menu: `g 3`) — the row shows `*` and is always
+  listed FIRST in pick.
+- golden nodes are NEVER auto-pruned (not by `prune_failures`, not by
+  `--drop-dead`); only you remove them (`g` again or `d`).
+- `gozar check` still re-tests them every round — if one revives it flows
+  back into the fast tier automatically.
+- `gozar status` counts them; `gozar list` marks them with `*`.
+
+## Display & list actions (v1.3.1)
+
+- per-run node table with latency bars and stars (★ fast, ● backup, ☓ dead)
+- live progress bar line on TTY (Style C1), heartbeat when piped
+- boxed summary card after every tier
+- `gozar list --pin N...` / `--drop N...` / `--recheck`
+
+## The 3 categories: best / bak / gen
+
+Every node you can actually use lands in exactly one of three lists, written to
+`data/` as `.txt` (raw links), `.json` (records) and `.summary.txt` (human table):
+
+| list | file | what it means | glyph |
+|---|---|---|---|
+| **best** | `best.txt` | fast **and** opens your target(s) | ★ |
+| **bak**  | `bak.txt`  | connected, opens your target(s), higher latency (or overflow of `best_n`) | ● |
+| **gen**  | `gen.txt`  | connected & healthy but **did not** open your target — still fine for Telegram / general web | ◆ |
+
+So a day when your target is unreachable everywhere does not leave you with zero
+nodes: `gen.txt` still has working exits.
+
+```bash
+gozar connect                 # best (auto-falls back to bak, then gen)
+gozar connect --from bak      # explicit
+gozar connect --from gen      # general/Telegram pool
+gozar list                    # all three lists
+gozar pick                    # f cycles: usable / fast / backup / general / slow / dead
+```
+
+## Tunnel proof — a 2xx is not evidence
+
+`echo_url` defaults to `generate_204`, whose body is **empty**. Before v1.5.0 that
+meant the bot only knew "some 2xx came back" — on an interfered or transparent line
+the answer can arrive **without ever crossing the node**, so dead nodes were reported
+as alive and fast.
+
+Now every run:
+
+1. reads **your own public IP directly** (no proxy) — the proof baseline, printed as
+   `Tunnel-proof baseline: your own line IP = ...`
+2. reads the **exit IP through the tunnel** (`cdn-cgi/trace` gives `ip=` + country +
+   colo, with 6 fallback services; IPv4 **and** IPv6)
+3. if `exit IP == your own line IP` ⇒ **`leak`** ⇒ the node is rejected, marked in
+   `state.json` and reported as `[LEAK] ...`
+
+The probe runs **concurrently** with the target check, so it costs ~0 extra time.
+
+```bash
+gozar verify -n 10 --from all     # per node: TUNNELED ✓ / LEAK ✗ / UNVERIFIED ? / DEAD ✗
+gozar verify --port 2080          # verify the proxy `gozar connect` is serving right now
+gozar discover --strict-exit      # also reject nodes whose exit IP cannot be read
+gozar discover --no-exit-proof    # turn the proof off (not recommended)
+```
+
+`UNVERIFIED ?` means the exit-IP services were unreachable through that node — it may
+still work, it just could not be proven.
+
+### "curl says 403 but the bot says it works" — both are right
+
+Targets behind Cloudflare (example.com included) apply a **bot rule on User-Agent**.
+Measured live through the *same* proxy in the *same* second:
+
+```bash
+curl -x socks5h://127.0.0.1:2080 -I https://example.com/
+# HTTP/2 403 + cf-mitigated: challenge + "Just a moment..."   <- curl's own UA
+
+curl -x socks5h://127.0.0.1:2080 -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) \
+  AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36" -I https://example.com/
+# HTTP/2 200 + cf-ray: ...-DFW                                <- same node, browser UA
+```
+
+Receiving that 403 *from Cloudflare's edge* is itself proof the tunnel worked.
+`gozar verify --port 2080` prints both answers side by side so you never have to guess.
+Also note `socks5h://` (remote DNS) vs `socks5://` (local DNS) — on a poisoned line the
+latter can fail even with a perfect node.
+
+## Check & re-check: reading the numbers
+
+`gozar check` re-tests the pool and the display now always tells you **how fresh** each
+number is:
+
+```
+Pool after check: 17 usable = 3 fast + 10 bak + 4 gen | dead=5 (5 died now, 0 revived, 0 promoted, 1 demoted)
+  ☓ trojan      141.193.213.172:443 — dead (no answer)
+  dead nodes left the pool; they stay in state and come back automatically if they pass a later check
+```
+
+The contract:
+
+- every record carries `last_check`, `alive_now`, `last_result` (`ok` / `no_target` /
+  `cf_challenge` / `cf_block` / `leak` / `dead` / `probe_dead`) and `last_error`
+- a node that fails a check moves to `tier=dead`: it **leaves** `best/bak/gen`, the
+  output files and the default picker view immediately
+- dead nodes are **retried on every later check** and revive automatically when they
+  pass again (`revived=N` in the summary) — the pool never shrinks permanently
+- a stale latency is shown greyed with a `~` prefix (`~452ms` = last known, not current),
+  and every row ends with `last:FAIL·25s (dead)` or `last:ok·2m`
+- `gozar pick` → `f` → `dead` lists them so you can bulk-delete with `d`;
+  `gozar list` prints a note saying how many are hidden
+- `gozar status` shows `usable / dead` and how long ago the last check ran
+
+## Version history
+
+Every change, bug and the reason behind each decision lives in `CHANGELOG.md`; it is not duplicated here.
+
+## Tests
+
+The contract suite lives in `tests/test_contracts.py` (219 checks, no
+network needed) and pins the decisions that are easy to undo by accident:
+what "usable" means, the three pools, the shell-target verdict, Ctrl+C bounds.
+
+```bash
+python3 tests/test_contracts.py     # PASS/FAIL table, exit 1 on any FAIL
+```
+
+Live runs use a throwaway data dir, so they never touch your pool:
+
+```bash
+gozar -o /tmp/try discover -t https://example.com/ -n 5
+```
+
+## Harsh-phase flags: --open-sni & --safe-ports
+
+Measured on a real filtered line (Oct 2026): exotic node SNIs get
+TLS-reset at handshake, uncommon ports get killed, but `*.ir` plus a few
+big hosts always complete TLS.
+
+```bash
+bot discover --open-sni                 # node SNI must be in today's open set
+bot discover --safe-ports               # only ports 443/8443/80/2083
+bot discover --cdn --open-sni --safe-ports -i links.txt   # full-shutdown combo
+```
+
+All flags are off by default — default behaviour stays broad/global.
+
+## National-internet mode (--cdn) — Cloudflare-fronted only
+
+During "national internet" phases almost every server dies but the
+Cloudflare edge usually stays reachable (domestic services use it too).
+`--cdn` keeps only nodes whose server IP sits in the official CF IPv4
+ranges (15 ranges pinned in code):
+
+```bash
+bot discover --cdn
+bot discover --cdn -i links.txt --domestic   # full-shutdown combo
+```
+
+## Import your own links (-i FILE) — tested first
+
+Got a bunch of node links from a Telegram channel or a free sub? Drop them
+into a file (mixed raw links, `#` comments, base64 sub blocks — all fine):
+
+```bash
+bot discover -i links.txt          # your links are tested BEFORE the tiers
+bot discover -i a.txt -i b.txt     # repeatable
+```
+
+The full parser extracts every valid vless/hy2/trojan/vmess/ss/tuic/anytls
+link, dedupes them, counts and drops garbage
+(`3 valid links (1 skipped as garbage)`). Since they are hand-picked, they
+get the real sing-box test before known nodes and before the source tiers.
+Survivors land in state like everything else.
+
+## Shutdown mode — domestic sources (--domestic)
+
+When international internet is fully cut, GitHub sources do not load.
+Add Iranian-hosted subscription URLs to `config.json`:
+
+```json
+"domestic_sources": ["https://sub.example.ir/nodes.txt"]
+```
+
+- normal mode: domestic sources are fetched FIRST (cheap if offline)
+- full shutdown: `gozar discover --domestic` reads ONLY these and still hunts
+  for working nodes
+
+## Tips for harsh lines
+
+```bash
+gozar discover --probe-concurrency 200 --concurrency 6 --max-per-proto 150 -n 30
+gozar loop --check-interval 1800 -n 20            # self-maintaining in background
+
+# pacing + circuit breaker + target-based latency are ON BY DEFAULT
+# (probe jitter 15ms / test jitter 50ms / breaker 25-fails backoff).
+# Tune only if your line is harsher than usual:
+gozar discover --pace 200        # raise pacing; set 0 to disable
+
+# be boring about it: fewer parallel tests, longer timeouts, keep going
+gozar discover --hard -n 30
+
+# find out whether the pool or the line is the problem
+gozar doctor
+
+# rank by echo ping instead of target download time (opposite of default):
+gozar discover --latency-basis echo
+```
+
+## Safe defaults (always on)
+
+- probe/test pacing jitter (15/50ms) — avoids port-scan-looking bursts
+- circuit breakers — 25 consecutive test fails → exponential backoff; 400 dead probes in a row → 20s pause
+- `latency_basis=target` — ranking uses real target download time when targets are configured
+
+Manual/confirm-only: `--drop-dead`, `--verify-ssl`.

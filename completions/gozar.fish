@@ -1,0 +1,106 @@
+# fish completion for `gozar` — kept in sync with argparse in gozar/bot.py
+
+# top-level subcommands
+set -l cmds discover check loop run connect pick drop list status verify calibrate sources config doctor
+
+complete -c gozar -f
+complete -c gozar -n "not __fish_seen_subcommand_from $cmds" -a discover -d "Gather and test nodes via tiered cascade"
+complete -c gozar -n "not __fish_seen_subcommand_from $cmds" -a check -d "Re-check stored nodes, prune dead ones"
+complete -c gozar -n "not __fish_seen_subcommand_from $cmds" -a loop -d "Self-maintaining loop (periodic discover+check)"
+complete -c gozar -n "not __fish_seen_subcommand_from $cmds" -a run -d "Find + verify + pick + connect in one flow"
+complete -c gozar -n "not __fish_seen_subcommand_from $cmds" -a connect -d "urltest proxy over the best nodes"
+complete -c gozar -n "not __fish_seen_subcommand_from $cmds" -a pick -d "Interactive picker (golden first, curses TUI)"
+complete -c gozar -n "not __fish_seen_subcommand_from $cmds" -a drop -d "Delete a node by id or index"
+complete -c gozar -n "not __fish_seen_subcommand_from $cmds" -a list -d "Show best and backup nodes"
+complete -c gozar -n "not __fish_seen_subcommand_from $cmds" -a status -d "Overall stats and active config"
+complete -c gozar -n "not __fish_seen_subcommand_from $cmds" -a verify -d "Exit-IP tunnel proof (TUNNELED / LEAK / DEAD)"
+complete -c gozar -n "not __fish_seen_subcommand_from $cmds" -a calibrate -d "Measure your line, propose the ceilings"
+complete -c gozar -n "not __fish_seen_subcommand_from $cmds" -a sources -d "Score sources against one target"
+complete -c gozar -n "not __fish_seen_subcommand_from $cmds" -a config -d "See and change the settings"
+complete -c gozar -n "not __fish_seen_subcommand_from $cmds" -a doctor -d "Environment and source diagnostics"
+complete -c gozar -n "__fish_seen_subcommand_from list" -l pin -r -d "Pin row(s) to golden pool"
+complete -c gozar -n "__fish_seen_subcommand_from list" -l drop -r -d "Delete row(s) from pool"
+complete -c gozar -n "__fish_seen_subcommand_from list" -l recheck -d "Re-test the shown pool"
+
+# common flags — every subcommand
+for cmd in $cmds
+    complete -c gozar -n "__fish_seen_subcommand_from $cmd" -s c -l config -r -F -d "config.json path"
+    complete -c gozar -n "__fish_seen_subcommand_from $cmd" -s v -l verbose -d "Verbose logging"
+    complete -c gozar -n "__fish_seen_subcommand_from $cmd" -l version -d "Show name and version"
+end
+
+# shared search flags — discover/check/loop/run
+for cmd in discover check loop run
+    complete -c gozar -n "__fish_seen_subcommand_from $cmd" -s t -l target -r -d "Real-world target URL (repeatable)"
+    complete -c gozar -n "__fish_seen_subcommand_from $cmd" -s n -l count -r -d "How many fast (best) nodes"
+    complete -c gozar -n "__fish_seen_subcommand_from $cmd" -l bak -r -d "How many backup nodes"
+    complete -c gozar -n "__fish_seen_subcommand_from $cmd" -s p -l protocols -r -d "Comma list: vless,hysteria2,trojan,..."
+    complete -c gozar -n "__fish_seen_subcommand_from $cmd" -l baseline-ms -r -d "Manual baseline ping (ms)"
+    complete -c gozar -n "__fish_seen_subcommand_from $cmd" -l fast-factor -r -d "Fast threshold multiplier (default 1.2)"
+    complete -c gozar -n "__fish_seen_subcommand_from $cmd" -l fast-max -r -d "Max latency for the fast tier (ms)"
+    complete -c gozar -n "__fish_seen_subcommand_from $cmd" -l min-speed -r -d "Minimum acceptable speed (ms)"
+    complete -c gozar -n "__fish_seen_subcommand_from $cmd" -l bak-max -r -d "Above this latency nodes are not stored"
+    complete -c gozar -n "__fish_seen_subcommand_from $cmd" -l max-per-proto -r -d "Initial cap per protocol (0 = unlimited)"
+    complete -c gozar -n "__fish_seen_subcommand_from $cmd" -l concurrency -r -d "Concurrent sing-box tests"
+    complete -c gozar -n "__fish_seen_subcommand_from $cmd" -l probe-concurrency -r -d "Concurrent TCP probes"
+    complete -c gozar -n "__fish_seen_subcommand_from $cmd" -l timeout -r -d "Echo timeout (s)"
+    complete -c gozar -n "__fish_seen_subcommand_from $cmd" -l target-timeout -r -d "Per-target timeout (s)"
+    complete -c gozar -n "__fish_seen_subcommand_from $cmd" -l startup-delay -r -d "sing-box startup delay per test (s)"
+    complete -c gozar -n "__fish_seen_subcommand_from $cmd" -l verify-ssl -d "Enforce strict TLS verification"
+    complete -c gozar -n "__fish_seen_subcommand_from $cmd" -l no-verify-ssl -d "Disable TLS verification"
+        complete -c gozar -n "__fish_seen_subcommand_from $cmd" -l pace -r -d "Jitter spreading of starts, 0..MS (anti rate-limit)"
+    complete -c gozar -n "__fish_seen_subcommand_from $cmd" -l breaker -d "Circuit breaker: pause when failures pile up"
+    complete -c gozar -n "__fish_seen_subcommand_from $cmd" -l latency-basis -r -a "echo target" -d "Ranking basis: echo ping or target download time"
+    complete -c gozar -n "__fish_seen_subcommand_from $cmd" -l cdn -d "Only Cloudflare-fronted nodes (shutdown survival pool)"
+    complete -c gozar -n "__fish_seen_subcommand_from $cmd" -l open-sni -d "Only nodes with SNI in today's open corridor"
+    complete -c gozar -n "__fish_seen_subcommand_from $cmd" -l safe-ports -d "Only nodes on filter-friendly ports (443/8443/80/2083)"
+    complete -c gozar -n "__fish_seen_subcommand_from $cmd" -s i -l import -r -F -d "Local file of node links, tested FIRST (repeatable)"
+    complete -c gozar -n "__fish_seen_subcommand_from $cmd" -l domestic -d "Use ONLY domestic (.ir) sources (shutdown mode)"
+    complete -c gozar -n "__fish_seen_subcommand_from $cmd" -s o -l data-dir -r -d "Output/state directory"
+end
+
+# per-command extras
+complete -c gozar -n "__fish_seen_subcommand_from check" -l prune-failures -r -d "Drop node after N consecutive failures"
+complete -c gozar -n "__fish_seen_subcommand_from check" -l drop-dead -d "Delete immediately on this check's failure"
+complete -c gozar -n "__fish_seen_subcommand_from loop" -l check-interval -r -d "Seconds between checks (default 1800)"
+complete -c gozar -n "__fish_seen_subcommand_from loop" -l discover-interval -r -d "Min seconds between forced discovers"
+complete -c gozar -n "__fish_seen_subcommand_from connect" -l mode -r -a "proxy tun" -d "Connection mode"
+complete -c gozar -n "__fish_seen_subcommand_from connect" -l port -r -d "Local mixed proxy port"
+complete -c gozar -n "__fish_seen_subcommand_from connect" -l from -r -a "best bak all" -d "Which list to use"
+complete -c gozar -n "__fish_seen_subcommand_from connect" -l pin -r -d "Single pinned node by index (see bot list)"
+complete -c gozar -n "__fish_seen_subcommand_from run" -l mode -r -a "proxy tun" -d "Connection mode"
+complete -c gozar -n "__fish_seen_subcommand_from run" -l port -r -d "Local mixed proxy port"
+complete -c gozar -n "__fish_seen_subcommand_from run" -l force -d "Force a fresh discover"
+complete -c gozar -n "__fish_seen_subcommand_from pick" -l mode -r -a "proxy tun" -d "Connection mode"
+complete -c gozar -n "__fish_seen_subcommand_from pick" -l port -r -d "Local mixed proxy port"
+complete -c gozar -n "__fish_seen_subcommand_from pick" -l from -r -a "best bak all" -d "Starting list (f cycles inside)"
+complete -c gozar -n "__fish_seen_subcommand_from drop" -f -a "1 2 3 4 5" -d "Node index or short id"
+
+# slimming pass (v1.9.0): only flags that exist in argparse are completed
+for cmd in discover check loop run
+    complete -c gozar -n "__fish_seen_subcommand_from $cmd" -l no-target -d "Ignore config targets (liveness only)"
+    complete -c gozar -n "__fish_seen_subcommand_from $cmd" -l reset -d "Archive the old pool and start fresh"
+    complete -c gozar -n "__fish_seen_subcommand_from $cmd" -l strict-target -d "Keep only nodes that pass every target"
+    complete -c gozar -n "__fish_seen_subcommand_from $cmd" -l list-mode -r -a "target live" -d "What best/bak mean"
+    complete -c gozar -n "__fish_seen_subcommand_from $cmd" -l max-per-subnet -r -d "Max nodes per /24 (0 = off)"
+    complete -c gozar -n "__fish_seen_subcommand_from $cmd" -l probe -r -a "auto on off" -d "TCP pre-filter mode"
+    complete -c gozar -n "__fish_seen_subcommand_from $cmd" -l no-probe -d "Skip the TCP pre-filter"
+end
+complete -c gozar -n "not __fish_seen_subcommand_from $cmds" -l hard -d "Filtered/throttled line preset"
+complete -c gozar -n "not __fish_seen_subcommand_from $cmds" -s q -l quiet -d "Warnings and results only"
+complete -c gozar -n "__fish_seen_subcommand_from config" -l show -d "Print the whole config"
+complete -c gozar -n "__fish_seen_subcommand_from config" -l get -r -d "Print one key"
+complete -c gozar -n "__fish_seen_subcommand_from config" -l set -r -d "Set one key (KEY=VALUE)"
+complete -c gozar -n "__fish_seen_subcommand_from config" -l unset -r -d "Remove a key (back to shipped default)"
+complete -c gozar -n "__fish_seen_subcommand_from config" -l doctor -d "Only stale or inconsistent keys"
+complete -c gozar -n "__fish_seen_subcommand_from calibrate" -l write -d "Save the proposal into the config file"
+complete -c gozar -n "__fish_seen_subcommand_from calibrate" -l profile -r -a "standard conservative fast" -d "Ceiling profile"
+complete -c gozar -n "__fish_seen_subcommand_from sources" -l per-source -r -d "Sample size per source"
+complete -c gozar -n "__fish_seen_subcommand_from sources" -l top -r -d "Show only the top N"
+complete -c gozar -n "__fish_seen_subcommand_from verify" -l from -r -a "best bak gen all" -d "Which pool to verify"
+complete -c gozar -n "__fish_seen_subcommand_from run connect pick" -l allow-no-target -d "Allow connecting with no target-OK node"
+complete -c gozar -n "__fish_seen_subcommand_from run connect pick" -l no-pretest -d "Skip the pre-connect test"
+complete -c gozar -n "__fish_seen_subcommand_from run connect pick" -l no-exit-proof -d "Do not require exit-IP proof"
+complete -c gozar -n "__fish_seen_subcommand_from run connect pick" -l strict-exit -d "Require exit-IP proof"
+complete -c gozar -n "__fish_seen_subcommand_from doctor" -l config-out -r -d "Where the sample config is written"
+complete -c gozar -n "__fish_seen_subcommand_from calibrate" -l propose -d "Print the proposal only"

@@ -1,0 +1,69 @@
+{
+  "protocols": [
+    "hysteria2",
+    "vless",
+    "trojan",
+    "tuic",
+    "vmess",
+    "shadowsocks"
+  ],
+  "custom_configs": [],
+  "import_files": [],
+  "domestic_sources": [],
+  "targets": [
+    "https://arena.ai/"
+  ],
+  "echo_url": "https://www.google.com/generate_204",
+  "verify_exit_ip": true,
+  "exit_probe_urls": [
+    "https://www.cloudflare.com/cdn-cgi/trace",
+    "https://api.ipify.org?format=text",
+    "https://api.ip.sb/ip",
+    "https://icanhazip.com/",
+    "https://checkip.amazonaws.com/",
+    "https://ipinfo.io/ip",
+    "https://ifconfig.me/ip"
+  ],
+  "best_n": 50,
+  "bak_n": 100,
+  "gen_n": 100,
+  "max_per_proto": 0,
+  "max_per_endpoint": 3,
+  "baseline_hosts": [
+    "1.1.1.1:443",
+    "1.0.0.1:443",
+    "8.8.8.8:443",
+    "9.9.9.9:443"
+  ],
+  "baseline_ms_override": null,
+  "fast_factor": 1.2,
+  "fast_min_ms": 150,
+  "fast_max_ms": 1200,
+  "backup_max_ms": 4000,
+  "fast_tier_low": 1500,
+  "fast_tier_mid": 2500,
+  "fast_tier_high": 4000,
+  "max_acceptable_ms": null,
+  "probe_concurrency": 400,
+  "probe_timeout": 3.5,
+  "test_concurrency": 14,
+  "timeout": 8,
+  "target_timeout": 12,
+  "startup_delay": 0.8,
+  "verify_ssl": false,
+  "prune_failures": 6,
+  "check_interval": 1800,
+  "discover_interval": 21600,
+  "data_dir": "data",
+  "connect": {
+    "mode": "proxy",
+    "port": 2080
+  },
+  "probe_pace_ms": 15,
+  "probe_breaker_window": 400,
+  "probe_breaker_pause_s": 20,
+  "test_pace_ms": 50,
+  "test_breaker_streak": 25,
+  "latency_basis": "target",
+  "strict_exit_proof": false
+}
