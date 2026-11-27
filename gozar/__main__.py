@@ -4,7 +4,7 @@ import sys
 
 
 def main() -> int:
-    from .bot import main as _main
+    from .cli import main as _main
     return _main(sys.argv[1:])
 
 

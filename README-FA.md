@@ -417,6 +417,58 @@ gozar discover -t https://example.com/ -t https://www.gstatic.com/generate_204 -
 
 ## عیب‌یابی سریع
 
+### `ModuleNotFoundError: No module named 'gozar'` بعد از نصب موفق
+
+این خطا چهار علت کاملاً متفاوت دارد و هر کدام درمان خودش را می‌خواهد. ترتیب
+احتمال:
+
+| # | علت | چطور بفهمم | درمان |
+|---|---|---|---|
+| ۱ | user site-packages برای آن پایتون **خاموش** است (`PYTHONNOUSERSITE=1` یا `python -s`) | `python3 -c "import site;print(site.ENABLE_USER_SITE)"` → `False` | `unset PYTHONNOUSERSITE` یا نصب در venv |
+| ۲ | **دو پایتون**: pip در یکی نصب کرده، اسکریپت با دیگری اجرا می‌شود (`/usr/bin` و `/usr/local/bin`) | `head -1 $(command -v gozar)` پایتونی را نشان می‌دهد که در `pip --version` نیست | با یک مفسر، هر دو کار را انجام بده |
+| ۳ | venv **بدون** `--system-site-packages` و بسته در `--user` نصب شده | `sys.prefix` با مفسر لانچر یکی نیست | داخل همان venv نصب کن، بدون `--user` |
+| ۴ | پوشهٔ باقی‌ماندهٔ `gozar/` **بدون** `__init__.py` بستهٔ واقعی را سایه انداخته | `print(importlib.util.find_spec('gozar'))` → `origin=None` | آن پوشه را پاک کن |
+
+دو دستور این را قطعی می‌کند و هیچ‌کدام نیاز به import شدن بسته ندارند:
+
+```bash
+gozar selfcheck                 # اگر gozar اجرا می‌شود: لانچر → مفسر → فایل‌ها
+python3 scripts/gozar-rescue.py # اگر اجرا نمی‌شود: مستقل، چیزی از پروژه import نمی‌کند
+```
+
+راه حلی که هر چهار علت را کنار می‌زند:
+
+```bash
+python3 -m venv ~/.gozar
+~/.gozar/bin/pip install "git+https://github.com/amirreaper/gozar.git"
+~/.gozar/bin/gozar doctor
+```
+
+از v2.1.2 خودِ فایل `gozar` یک اسکریپت واقعی است، نه stub ستاپ‌تولز؛ پس اگر
+import بشکند، همان چهار علت را با نام مفسر درست چاپ می‌کند و با کد ۲ خارج می‌شود.
+
+### کامپلیت (fish / bash / zsh)
+
+```bash
+# fish
+cp completions/gozar.fish ~/.config/fish/completions/
+
+# bash
+source completions/gozar.bash
+
+# zsh
+cp completions/_gozar ~/.zfunc/_gozar && fpath+=(~/.zfunc) && compinit
+```
+
+کامپلیت‌ها **از `argparse` تولید می‌شوند**، دستی نوشته نشده‌اند:
+
+```bash
+python3 scripts/gen-completions.py           # هر سه را بازتولید می‌کند
+python3 scripts/gen-completions.py --check   # اگر عقب افتاده باشند، خطا می‌دهد
+```
+
+### بقیهٔ مشکل‌های رایج
+
 | مشکل | چه کار کنیم |
 |---|---|
 | `No module named 'aiohttp_socks'` | `pip install --target=vendor -r requirements.txt` یا فقط همین zip است؟ پوشه‌ی `vendor/` را نگه دار |

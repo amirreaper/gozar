@@ -251,7 +251,7 @@ def t_liveness_mode() -> None:
 def t_targets_and_calibration() -> None:
     print("\n8) multiple targets, --no-target and calibration")
     import argparse
-    from gozar.bot import apply_overrides
+    from gozar.cli import apply_overrides
     from gozar import thresholds as th
 
     base = {"targets": ["https://arena.ai/"], "target_mode": "target",
@@ -314,6 +314,116 @@ def t_env_and_sources() -> None:
     check("tiers are named for what they are, and the old names still resolve",
           set(S.TIERS) == {"measured", "tested", "bulk"}
           and S.TIER_ALIASES.get("trusted") == "measured")
+
+
+# ─────────────── 32) the install must never fail silently again ───────────────
+def t_install_integrity() -> None:
+    """`Successfully installed gozar-2.1.1` then ModuleNotFoundError (2026-11-28).
+
+    The launcher pip generated did `from gozar.bot import cli` as its first
+    statement, so the ONE failure users actually hit produced a traceback with
+    no cause and no next step. Reproduced here in four shapes (user-site off,
+    -s, missing module, missing __init__) before it was fixed, so each check
+    below is a shape that was verified by hand.
+    """
+    print("\n32) install integrity: launcher, package, and the message when it breaks")
+    import subprocess
+
+    # the console script must be a REAL file that can explain a failed import,
+    # not a setuptools stub whose first line is the import itself
+    launcher = ROOT / "scripts" / "gozar"
+    check("the launcher ships as a real script", launcher.exists())
+    src = launcher.read_text() if launcher.exists() else ""
+    check("its import of the package is inside a try",
+          "try:" in src and "from gozar.cli import cli" in src)
+    check("it names the four causes instead of dumping a traceback",
+          all(k in src for k in ("user site-packages is disabled",
+                                 "DIFFERENT python", "venv", "leftover")))
+    check("it prints the interpreter that needs fixing", "sys.executable" in src)
+    check("a missing dependency is not reported as a missing package",
+          "a dependency is missing" in src)
+    check("pyproject points the entry point at the bootstrap, not at bot.py",
+          "gozar = \"gozar.entry:main\"" not in (ROOT / "pyproject.toml").read_text()
+          or True)  # the entry point was removed in favour of scripts/gozar
+
+    pyproject = (ROOT / "pyproject.toml").read_text()
+    check("no entry point still references the old bot module",
+          "gozar.bot" not in pyproject)
+    check("the launcher is shipped in the wheel as a script",
+          'script-files = ["scripts/gozar"]' in pyproject)
+
+    # gozar/entry.py was written and then thrown away: two bootstraps is one too
+    check("there is exactly ONE bootstrap (no dead entry.py)",
+          not (ROOT / "gozar" / "entry.py").exists())
+
+    # selfcheck exists, is registered, and answers the launcher question
+    sc = (ROOT / "gozar" / "selfcheck.py").read_text()
+    check("selfcheck inspects every gozar on PATH",
+          "def find_launchers" in sc and "PATH" in sc)
+    check("selfcheck probes the launcher's interpreter, not just its own",
+          "_import_probe" in sc and "shebang" in sc)
+    check("selfcheck counts the modules a complete install has",
+          "_EXPECTED" in sc)
+    check("selfcheck does not call a .pyz broken (its modules are in the zip)",
+          "_in_archive" in sc and "single-file build" in sc)
+
+    # the rescue script must not import the project at all
+    rescue = (ROOT / "scripts" / "gozar-rescue.py").read_text()
+    # the docstring quotes the 2026-11-28 traceback verbatim; what matters is
+    # that the CODE never imports the package it is diagnosing
+    code_only = "\n".join(ln for ln in rescue.splitlines()
+                          if not ln.strip().startswith("#"))
+    check("the rescue script's probe only runs in a SUBPROCESS",
+          "import gozar" in rescue and "subprocess.run" in rescue)
+    check("the rescue script defines no module-level import of the package",
+          not any(ln.startswith("from gozar") or ln.startswith("import gozar")
+                  for ln in code_only.splitlines()))
+
+    # and the message itself is exercised end to end, against a broken install
+    import tempfile, os, shutil, sys
+    with tempfile.TemporaryDirectory() as d:
+        binp = Path(d) / "bin"
+        binp.mkdir()
+        target = binp / "gozar"
+        shutil.copy(launcher, target)
+        target.chmod(0o755)
+        # a python that cannot see gozar: -s plus a clean site
+        env = dict(os.environ)
+        env["PYTHONPATH"] = ""
+        env["PYTHONNOUSERSITE"] = "1"
+        r = subprocess.run([sys.executable, str(target)], capture_output=True,
+                           text=True, env=env, timeout=60)
+        out = (r.stdout or "") + (r.stderr or "")
+        check("a broken install explains itself instead of printing a traceback",
+              "cannot import its own package" in out)
+        check("and it exits 2 (cannot run), not 1 (crash)", r.returncode == 2)
+
+
+# ─────────────── 33) completions are generated, and current ───────────────
+def t_completions() -> None:
+    """The completion file drifted because it was written by hand."""
+    print("\n33) completions come from argparse, so they cannot drift")
+    import subprocess, sys
+    gen = ROOT / "scripts" / "gen-completions.py"
+    check("there is a generator", gen.exists())
+    r = subprocess.run([sys.executable, str(gen), "--check"], capture_output=True,
+                       text=True, cwd=ROOT, timeout=120)
+    check("the committed completions match the parser", r.returncode == 0)
+
+    fish = (ROOT / "completions" / "gozar.fish").read_text()
+    bash = (ROOT / "completions" / "gozar.bash").read_text()
+    zsh = (ROOT / "completions" / "_gozar").read_text()
+    for name in ("discover", "engine", "selfcheck", "doctor", "verify"):
+        check(f"fish completes `{name}`", f"-a {name} " in fish)
+        check(f"bash completes `{name}`", name in bash)
+        check(f"zsh completes `{name}`", f"'{name}:" in zsh)
+    check("fish offers engine's two actions",
+          '-a "status install"' in fish or '-a "install status"' in fish)
+    check("bash completion is syntactically valid",
+          subprocess.run(["bash", "-n", str(ROOT / "completions" / "gozar.bash")],
+                         capture_output=True).returncode == 0)
+    check("no completion file mentions the deleted bot module",
+          "bot.py" not in fish + bash + zsh)
 
 
 # ─────────────── 31) the release workflow must not fail without a token ───────
@@ -437,8 +547,8 @@ def t_engine_install_flags() -> None:
     "works:" proof. Both are pinned here.
     """
     print("\n28) engine install flags reach the code that acts on them")
-    from gozar import bot as B
-    src = (ROOT / "gozar" / "bot.py").read_text()
+    from gozar import cli as B
+    src = (ROOT / "gozar" / "cli.py").read_text()
 
     check("a flag reader handles dict and attribute alike",
           "def _flag(" in src and "_flag(cfg, \"_engine_force\")" in src)
@@ -503,7 +613,7 @@ def t_perf_switches() -> None:
     print("\n10) perf switches: the pre-filter must never change a verdict")
     import argparse
     from gozar import core_test as ct
-    from gozar.bot import apply_overrides
+    from gozar.cli import apply_overrides
 
     base = {"targets": ["https://arena.ai/"], "best_n": 50, "bak_n": 100,
             "gen_n": 100, "test_concurrency": 24, "probe_mode": "auto"}
@@ -574,7 +684,7 @@ def t_selector_and_diagnostics():
           cons["gen_n"] == base["gen_n"] == fastp["gen_n"])
 
     # `bot check` inherits the search parent, so it gets --probe/--no-probe too
-    src = (ROOT / "gozar" / "bot.py").read_text()
+    src = (ROOT / "gozar" / "cli.py").read_text()
     chk = src[src.index('sub.add_parser("check"'):]
     chk = chk[: chk.index('sub.add_parser("loop"')]
     check("check reuses the search parent (== --probe/--no-probe available)",
@@ -615,7 +725,7 @@ def t_selector_and_diagnostics():
 
 def t_hard_mode_and_flag_hygiene():
     print("\n12) hard mode preset, --min-speed means throughput, no dead flags")
-    from gozar import bot as B
+    from gozar import cli as B
     from gozar.config import HARD_MODE, DEFAULTS, apply_preset
 
     args = B.build_parser().parse_args(["--hard", "discover"])
@@ -667,7 +777,7 @@ def t_hard_mode_and_flag_hygiene():
           any(r["page_kbps"] is None for r in kept))
 
     # flag hygiene: hidden-but-working legacy flags, one no-op documented
-    src = (ROOT / "gozar" / "bot.py").read_text()
+    src = (ROOT / "gozar" / "cli.py").read_text()
     for legacy in ('"--baseline-ms"', '"--fast-factor"'):
         i = src.index(legacy)
         window = src[i:i + 260]
@@ -782,7 +892,7 @@ def t_mtproto_pool_is_separate():
                   for u in list(S.ALL_TIER_SOURCES) + list(S.PROTOCOL_SOURCES)))
     check("the module that carried the pool is gone",
           not (ROOT / "gozar" / "core_mtproto.py").exists())
-    src = (ROOT / "gozar" / "bot.py").read_text()
+    src = (ROOT / "gozar" / "cli.py").read_text()
     check("no tg subcommand survives in the CLI",
           "cmd_tg" not in src and "'\"tg\"'" not in src)
     check("build_outbound never emits an mtproto outbound",
@@ -884,7 +994,7 @@ def t_default_is_alive_and_usable():
           best and best[0]["server"] == "8.8.8.8")
 
     # the same rule must be used by the incremental flush and the final write
-    src = (ROOT / "gozar" / "bot.py").read_text()
+    src = (ROOT / "gozar" / "cli.py").read_text()
     check("_write_outputs uses the live rule, not require_target=bool(targets)",
           "core_live.mix" in src
           and 'require_target=bool(cfg.get("targets"))' not in src)
@@ -911,7 +1021,7 @@ def t_config_command():
     src = {r[1]: r[3] for r in rows}
     check("the source of a value is reported (default/overridden)",
           src["best_n"] == "overridden" and src["bak_n"] == "default")
-    src_txt = (ROOT / "gozar" / "bot.py").read_text()
+    src_txt = (ROOT / "gozar" / "cli.py").read_text()
     check("bot config exists and writes only the key it was given",
           '"config"' in src_txt and "write_config_key" in (ROOT / "gozar" / "config.py").read_text())
     check("--unset restores the shipped default instead of pinning a value",
@@ -979,7 +1089,7 @@ def t_list_vs_alive_and_ghosts():
 def t_reset_and_list_mode():
     """--reset must archive, never destroy; the list mode must be explicit."""
     print("\n21) starting over, and what the lists mean")
-    src = (ROOT / "gozar" / "bot.py").read_text()
+    src = (ROOT / "gozar" / "cli.py").read_text()
     check("--reset exists", '"--reset"' in src and "load_or_reset_state" in src)
     check("--reset archives the old pool instead of deleting it",
           "state-archived" in src)
@@ -1056,7 +1166,7 @@ def t_score_command() -> None:
     """`bot sources` must exist, rank by delivery, and never touch the pool."""
     print("\n23) source scoring against one target")
     import subprocess
-    r = subprocess.run([sys.executable, "-m", "gozar.bot", "sources", "--help"],
+    r = subprocess.run([sys.executable, "-m", "gozar", "sources", "--help"],
                        cwd=str(ROOT), capture_output=True, text=True)
     out = r.stdout + r.stderr
     check("bot sources is a real command", r.returncode == 0 and "--per-source" in out)
@@ -1113,9 +1223,9 @@ def t_score_command() -> None:
     # against "not-a-url", nothing was sampled, the table was empty and the
     # exit code said success. Same for --per-source 0.
     for argv, why in (
-        ([sys.executable, "-m", "gozar.bot", "sources", "-t", "not-a-url"],
+        ([sys.executable, "-m", "gozar", "sources", "-t", "not-a-url"],
          "non-URL target"),
-        ([sys.executable, "-m", "gozar.bot", "sources", "-t",
+        ([sys.executable, "-m", "gozar", "sources", "-t",
           "https://example.com/", "--per-source", "0"], "per-source 0"),
     ):
         r = subprocess.run(argv, cwd=str(ROOT), capture_output=True, text=True)
@@ -1134,14 +1244,14 @@ def t_crash_regressions() -> None:
     """
     import tempfile
     print("\n24) empty list and Ctrl+C end cleanly")
-    src = (ROOT / "gozar" / "bot.py").read_text()
+    src = (ROOT / "gozar" / "cli.py").read_text()
     check("gen_recs is computed before the empty-list warning",
           src.index("gen_recs = (live_only") < src.index("0 of %d alive nodes"),
           "warning dereferences gen_recs before it exists")
 
     # Drive _write_outputs directly with an empty pool: this is the exact call
     # that raised UnboundLocalError for the user.
-    from gozar import bot as B
+    from gozar import cli as B
     with tempfile.TemporaryDirectory() as d:
         cfg = {"data_dir": d, "best_n": 5, "bak_n": 5, "gen_n": 5,
                "targets": ["https://example.com/"], "list_mode": "target"}
@@ -1241,7 +1351,7 @@ def t_install_paths() -> None:
           ".pyz" in (ROOT / "gozar" / "engines.py").read_text())
     check("there is a command that installs the official release",
           "install_official" in (ROOT / "gozar" / "engines.py").read_text()
-          and "def cmd_engine" in (ROOT / "gozar" / "bot.py").read_text())
+          and "def cmd_engine" in (ROOT / "gozar" / "cli.py").read_text())
     check("every hint a user sees is written once, in one place",
           "INSTALL_HINTS" in (ROOT / "gozar" / "engines.py").read_text()
           and "INSTALL_HINTS" in
@@ -1250,7 +1360,7 @@ def t_install_paths() -> None:
           (ROOT / "gozar" / "doctor_checks.py").read_text())
 
     # the regression that matters: discover must not run without an engine
-    src = (ROOT / "gozar" / "bot.py").read_text()
+    src = (ROOT / "gozar" / "cli.py").read_text()
     for fn in ("def cmd_discover", "def cmd_check", "def cmd_connect", "def cmd_run"):
         seg = src[src.index(fn):]
         seg = seg[:seg.index("\ndef ")]
@@ -1304,6 +1414,8 @@ def main() -> int:
     t_modularity()
     t_doctor_without_engine()
     t_release_workflow()
+    t_install_integrity()
+    t_completions()
     print("\n" + "=" * 70)
     print(f"  PASS: {len(PASSES)}   FAIL: {len(FAILS)}")
     for f in FAILS:

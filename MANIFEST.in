@@ -1,5 +1,6 @@
 include README.md README-FA.md CHANGELOG.md LICENSE
-include config.json requirements.txt install.sh cli
+include config.json requirements.txt install.sh gozar-dev
+include scripts/gozar scripts/gozar-rescue.py
 recursive-include docs *.md
 recursive-include completions *.fish
 recursive-include tests *.py

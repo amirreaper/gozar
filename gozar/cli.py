@@ -1306,6 +1306,7 @@ def _show_help_friendly() -> int:
     out = [
         "gozar — find, test and connect through public proxy nodes",
         "",
+        "  gozar selfcheck             is this install intact? (run me first)",
         "  gozar engine install        get the sing-box binary (do this once)",
         "  gozar discover -n 20 -t https://example.com/",
         "  gozar verify                prove the stored nodes really tunnel",
@@ -1746,6 +1747,18 @@ def build_parser():
                     metavar="FILE", help="file to read/write (default: the -c "
                                          "config this run uses)")
 
+    sc = sub.add_parser("selfcheck", parents=[common],
+                        help="Did this install land intact? (launcher, interpreter, files)",
+                        description="Answers the traceback `ModuleNotFoundError: "
+                                    "No module named 'gozar'`: which interpreter "
+                                    "your launcher uses, what that interpreter can "
+                                    "import, where pip actually put the package, "
+                                    "and whether two copies are fighting over PATH. "
+                                    "`doctor` is the other half — it answers whether "
+                                    "gozar can reach anything.")
+    sc.add_argument("--fix", action="store_true",
+                    help="print the exact repair commands for what was found")
+
     doc = sub.add_parser("doctor", parents=[common],
                          help="Run diagnostics (binary, packages, sources, ping, sample test)",
                          description="Checks that the bot and its dependencies are "
@@ -1891,6 +1904,9 @@ def main(argv=None):
                           target=getattr(args, "engine_dir", None),
                           # -q silences; --yes only answers the prompt
                           quiet=bool(getattr(args, "quiet", False)))
+    elif args.cmd == "selfcheck":
+        from .selfcheck import run_selfcheck
+        return run_selfcheck(cfg, fix=getattr(args, "fix", False))
     elif args.cmd == "doctor":
         if getattr(args, "list_checks", False):
             from .doctor_checks import registry

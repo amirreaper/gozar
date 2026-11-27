@@ -134,7 +134,7 @@ sing-box نداشت، `discover` اول ۱٬۴۰۰ کاندید را fetch و pr
 
 **۲) آمادهٔ PyPI:**
 - `pyproject.toml` + `LICENSE` (MIT) + `MANIFEST.in`؛ چرخ‌دنده با
-  `pip install gozar` و اسکریپت کنسول `gozar = gozar.bot:cli`.
+  `pip install gozar` و اسکریپت کنسول `gozar`.
 - `python -m gozar` هم کار می‌کند (نقطهٔ ورود مستقل از لانچر).
 - `gozar doctor` و راهنماها دیگر به `bot ...` اشاره نمی‌کنند.
 

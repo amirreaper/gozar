@@ -22,9 +22,14 @@ gozar/
 ├── install.sh              # installs sing-box + venv (arch-detect)
 ├── config.json             # user overrides (defaults live in gozar/config.py)
 ├── requirements.txt        # aiohttp + aiohttp-socks (vendored under vendor/)
-├── completions/bot.fish    # fish completions
+├── completions/            # GENERATED from argparse (scripts/gen-completions.py)
+│   ├── gozar.fish · gozar.bash · _gozar
+├── scripts/
+│   ├── gozar              # the installed command (explains a broken import)
+│   ├── gozar-rescue.py    # standalone diagnosis, imports nothing from the project
+│   └── gen-completions.py # rewrites completions/ from the parser
 └── gozar/                  # the python package
-    ├── bot.py              # CLI: argument parsing, command dispatch, cmd_* functions
+    ├── cli.py              # CLI: argument parsing, command dispatch, cmd_* functions
     │
     ├── core_ui.py          # ⊙ shared vocabulary: OK/WARN/FAIL, say(), Ledger, wrap, table
     ├── doctor_checks.py    # ⊙ every doctor check as its own function + a registry
@@ -43,12 +48,13 @@ gozar/
     ├── thresholds.py       # adaptive fast/keep ceilings from your baseline
     ├── ui_pick.py          # interactive picker — curses TUI / stdin menu fallback
     ├── doctor.py           # ⊙ the running ORDER: static checks → live checks → verdict
+    ├── selfcheck.py        # ⊙ did the install land intact? launcher → interpreter → files
     ├── checker.py          # tcp_ping, udp_quic_ping, baseline, classify, exit-IP proof
     └── display.py          # ⊙ colour/bar/card paint layer (cosmetics only)
 ```
 
 `⊙` marks the shared pieces. The rule is one sentence: **wording lives in
-`core_ui`, decisions live in the module that owns the fact, and `bot.py` only
+`core_ui`, decisions live in the module that owns the fact, and `cli.py` only
 routes.** A command never invents its own `[WARN]` or its own exit code any more.
 
 ### The three seams, with the code
@@ -86,6 +92,58 @@ gozar doctor --only engine      # run exactly one (exit 2 when it fails)
 | 1 | **just try it, one file** | `curl -LO https://github.com/amirreaper/gozar/releases/latest/download/gozar.pyz` → `chmod +x gozar.pyz` → `./gozar.pyz engine install` |
 | 2 | **from git, user-wide** | `pip install --user "gozar[engine] @ git+https://github.com/amirreaper/gozar.git"` |
 | 3 | **developer checkout** | `git clone https://github.com/amirreaper/gozar.git && cd gozar && bash install.sh --venv` → `./gozar-dev` |
+
+### `gozar: ModuleNotFoundError: No module named 'gozar'` — read this once
+
+You will see this after a successful `pip install`. It is never one problem;
+it is one of four, and they need different fixes. In order of frequency:
+
+| # | cause | how you know | fix |
+|---|---|---|---|
+| 1 | **user site-packages is off** for the python the launcher uses (`PYTHONNOUSERSITE=1`, or `python -s`, common in managed shells) | `python3 -c "import site;print(site.ENABLE_USER_SITE)"` → `False` | `unset PYTHONNOUSERSITE`, or install into a venv (below) |
+| 2 | **two pythons**: `pip` installed into one, the script runs the other (`/usr/bin/python3` vs `/usr/local/bin/python3`) | `head -1 $(command -v gozar)` shows a python that `pip --version` does not mention | use one interpreter for both, by full path |
+| 3 | **venv without `--system-site-packages`** and the package went to `--user` | `python3 -c "import sys;print(sys.prefix)"` differs from the launcher's | install *inside* the venv, no `--user` |
+| 4 | a leftover **`gozar/` directory without `__init__.py`** shadows the real package | `python3 -c "import importlib.util as u;print(u.find_spec('gozar'))"` → `origin=None` | delete that directory |
+
+Two commands settle it, and neither needs the package to import:
+
+```bash
+gozar selfcheck          # if gozar runs at all: launcher → interpreter → files
+python3 scripts/gozar-rescue.py    # if it does not: standalone, imports nothing
+```
+
+The fix that avoids all four, and the one to recommend to anyone who is not
+debugging:
+
+```bash
+python3 -m venv ~/.gozar
+~/.gozar/bin/pip install "git+https://github.com/amirreaper/gozar.git"
+~/.gozar/bin/gozar doctor
+```
+
+Since v2.1.2 the installed `gozar` command is a real script instead of a
+setuptools stub, so a broken import prints those four causes and the exact
+interpreter to reinstall with, then exits 2.
+
+### Completions
+
+```bash
+# fish
+cp completions/gozar.fish ~/.config/fish/completions/
+
+# bash
+source completions/gozar.bash        # or: cp to /etc/bash_completion.d/
+
+# zsh
+cp completions/_gozar ~/.zfunc/_gozar && fpath+=(~/.zfunc) && compinit
+```
+
+They are generated from `argparse`, not written by hand:
+
+```bash
+python3 scripts/gen-completions.py           # regenerate all three
+python3 scripts/gen-completions.py --check   # fails if they drifted
+```
 
 > `pip install gozar` will work once the package is on PyPI. Until then it is
 > **not** published, and every doc here says so on purpose — a README that

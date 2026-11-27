@@ -43,14 +43,29 @@ elif [ "$WANT_VENV" = 1 ]; then
   ./.venv/bin/pip install -q -r requirements.txt
   say "dependencies: installed in .venv (the ./gozar-dev launcher picks it up)"
 elif [ "$WANT_SYSTEM" = 1 ]; then
-  say "installing gozar with pip --user"
-  "$PY" -m pip install --user -q -e . 2>/dev/null || "$PY" -m pip install --user -q aiohttp aiohttp-socks
+  # ONE interpreter for the install and the command. `pip install -e .` put the
+  # launcher in ~/.local/bin while the package went wherever pip felt like it,
+  # which is the 2026-11-28 "installed, then ModuleNotFoundError" report.
+  say "installing gozar with $PY -m pip --user"
+  "$PY" -m pip install --user -q --force-reinstall . || {
+    echo "    pip refused. install the two dependencies only, then run ./gozar-dev" >&2
+    "$PY" -m pip install --user -q aiohttp aiohttp-socks
+  }
+  # prove it, using the same interpreter, before telling anyone it worked
+  if "$PY" -m gozar --version >/dev/null 2>&1; then
+    say "gozar $("$PY" -m gozar --version | awk '{print $2}') can run under $PY"
+  else
+    echo "    WARNING: $PY -m gozar does not run. Diagnose it with:" >&2
+    echo "      $PY scripts/gozar-rescue.py" >&2
+  fi
+  have gozar && say "command on PATH: $(command -v gozar)" \
+    || echo "    ~/.local/bin is not on PATH; add it or use: $PY -m gozar" >&2
 else
   cat <<'MSG'
     dependencies: NOT installed (aiohttp, aiohttp-socks)
       bash install.sh --venv        # local .venv, nothing system-wide
       bash install.sh --system      # pip install --user
-      pip install gozar             # or just use the packaged version
+      ./gozar-dev discover          # works without installing anything
 MSG
 fi
 
@@ -67,3 +82,4 @@ if ! "$PY" -m gozar engine status >/dev/null 2>&1; then
 fi
 
 say "done — try:  ./gozar-dev --version   and   ./gozar-dev doctor"
+have gozar && say "or, if you used --system:  gozar doctor" || true

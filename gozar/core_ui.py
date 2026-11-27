@@ -3,7 +3,7 @@
 Why this module exists
 ---------------------
 Commands were each printing their own opinion of the same three words: OK,
-WARN, FAIL. doctor had `_ok/_warn/_fail`, bot.py printed coloured strings by
+WARN, FAIL. doctor had `_ok/_warn/_fail`, cli.py printed coloured strings by
 hand, engines.py printed bare lines. Nothing was wrong with any single one of
 them — the problem is that "how a warning looks" was decided in nine places,
 so it drifted (one said ``[WARN]``, another said ``warning:``, a third printed

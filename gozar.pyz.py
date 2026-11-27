@@ -38,7 +38,7 @@ def main() -> int:
             "    pip install aiohttp aiohttp-socks\\n"
             "or install from git:  pip install git+https://github.com/amirreaper/gozar.git\\n")
         return 2
-    from gozar.bot import main as _main
+    from gozar.cli import main as _main
     return _main(sys.argv[1:])
 
 if __name__ == "__main__":

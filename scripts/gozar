@@ -1,0 +1,119 @@
+#!/usr/bin/env python3
+"""The installed `gozar` command.
+
+This file is copied to the interpreter's bin directory by pip, so its shebang
+always points at the python that pip installed into. Everything you see here is
+deliberately import-light: the ONLY import of the gozar package is inside a
+try, because the report this file exists for is
+
+    Traceback (most recent call last):
+      File "/home/amir/.local/bin/gozar", line 3, in <module>
+        from gozar.bot import cli
+    ModuleNotFoundError: No module named 'gozar'
+
+A console_scripts entry point cannot explain that: the first thing it does is
+import the package, so a broken install dies before any of our code runs. A
+hand-written script can, because the explanation lives in the script itself.
+"""
+import os
+import sys
+
+RESCUE = """\
+{head}
+
+  launcher   : {script}
+  python     : {exe}
+  user site  : {usersite}  (enabled={enabled})
+  gozar      : {found}
+  reason     : {error}
+
+Four things cause this, and they need different fixes:
+
+  1. user site-packages is disabled for that python
+     (PYTHONNOUSERSITE=1, or the script runs `python -s`)
+     -> unset it, or install with:  {exe} -m pip install --user --force-reinstall {url}
+
+  2. pip installed into a DIFFERENT python than this launcher uses
+     (two pythons: /usr/bin/python3 and /usr/local/bin/python3)
+     -> use the same one for both:  {exe} -m pip install --user --force-reinstall {url}
+        {exe} -m gozar --version
+
+  3. this is a venv and the package went to the user site instead
+     -> {exe} -m pip install {url}
+
+  4. a leftover `gozar` directory (no __init__.py) shadows the real package
+     -> find it:  {exe} -c "import importlib.util as u;print(u.find_spec('gozar'))"
+
+The clean fix that avoids all four:
+
+  python3 -m venv ~/.gozar
+  ~/.gozar/bin/pip install {url}
+  ~/.gozar/bin/gozar doctor
+
+No clone, no install needed for the diagnosis:
+  python3 scripts/gozar-rescue.py     (or curl the same file from the repo)
+"""
+
+URL = "git+https://github.com/amirreaper/gozar.git"
+
+
+HEAD_MISSING = """\
+gozar: installed, but this launcher cannot import its own package.
+"""
+HEAD_BROKEN = """\
+gozar: the package is installed but incomplete — a module inside it is missing.
+   Reinstall it with the interpreter this launcher uses (below).
+"""
+
+
+def _explain(exc):
+    try:
+        import site
+        usersite = site.getusersitepackages()
+        enabled = site.ENABLE_USER_SITE
+    except Exception:                          # noqa: BLE001
+        usersite, enabled = "?", "?"
+    try:
+        import importlib.util
+        spec = importlib.util.find_spec("gozar")
+        found = getattr(spec, "origin", None) or "not importable"
+    except Exception:                          # noqa: BLE001
+        found = "<import machinery is broken too>"
+    # "no gozar at all" and "gozar is here but a file of it is gone" must not
+    # give the same advice: the first is a PATH/interpreter problem, the second
+    # is a corrupt install.
+    head = HEAD_BROKEN if found not in ("not importable",
+                                        "<import machinery is broken too>") \
+        and not str(exc).startswith("ModuleNotFoundError: No module named 'gozar'") \
+        else HEAD_MISSING
+    sys.stderr.write(RESCUE.format(head=head, script=os.path.abspath(__file__),
+                                   exe=sys.executable, usersite=usersite,
+                                   enabled=enabled, found=found,
+                                   error="%s: %s" % (type(exc).__name__, exc),
+                                   url=URL))
+    return 2
+
+
+def main():
+    # `-s` was used to launch us? say so before anything else can confuse it
+    try:
+        from gozar.cli import cli
+    except ModuleNotFoundError as e:
+        if "gozar" in str(e):
+            return _explain(e)
+        # a dependency, not the package: a different message and a different fix
+        sys.stderr.write(
+            "gozar: a dependency is missing — %s\n"
+            "       fix: %s -m pip install aiohttp aiohttp-socks\n"
+            % (e, sys.executable))
+        return 2
+    except Exception as e:                     # noqa: BLE001
+        return _explain(e)
+    return cli(sys.argv[1:])
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except KeyboardInterrupt:
+        sys.exit(130)

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gozar"
-version = "2.1.1"
+version = "2.1.2"
 description = "Find, test and keep a working pool of free public proxy configs, then connect through the best of them."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -33,15 +33,23 @@ dependencies = [
 engine = ["sing-box-bin>=1.10"]
 dev = ["setuptools>=68", "build", "twine"]
 
-[project.scripts]
-gozar = "gozar.bot:cli"
+# Console script: a real, hand-written FILE (scripts/gozar) rather than a
+# setuptools stub. From a 2026-11-28 report: a generated stub's first statement
+# is `from gozar.cli import cli`, so on a broken install the user sees a bare
+# ModuleNotFoundError from ~/.local/bin/gozar and cannot tell which of four
+# causes it is. scripts/gozar wraps that import and explains it.
+#
+# pip only rewrites the shebang of a file it ships as `scripts/`, so the file is
+# shipped in the wheel's script directory (see MANIFEST.in + scripts/gozar).
+# NO [project.scripts] on purpose — see below.
+[tool.setuptools]
+packages = ["gozar"]
+script-files = ["scripts/gozar"]
 
 [project.urls]
 Homepage = "https://github.com/amirreaper/gozar"
 Repository = "https://github.com/amirreaper/gozar"
 
-[tool.setuptools]
-packages = ["gozar"]
-
 [tool.setuptools.package-data]
 gozar = ["py.typed"]
+
