@@ -33,8 +33,8 @@ dev = ["setuptools>=68", "build"]
 gozar = "gozar.bot:cli"
 
 [project.urls]
-Homepage = "https://github.com/YOURNAME/gozar"
-Repository = "https://github.com/YOURNAME/gozar"
+Homepage = "https://github.com/amirreaper/gozar"
+Repository = "https://github.com/amirreaper/gozar"
 
 [tool.setuptools]
 packages = ["gozar"]
