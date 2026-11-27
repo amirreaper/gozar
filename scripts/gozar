@@ -20,7 +20,6 @@ import sys
 
 RESCUE = """\
 {head}
-
   launcher   : {script}
   python     : {exe}
   user site  : {usersite}  (enabled={enabled})
@@ -57,13 +56,10 @@ No clone, no install needed for the diagnosis:
 URL = "git+https://github.com/amirreaper/gozar.git"
 
 
-HEAD_MISSING = """\
-gozar: installed, but this launcher cannot import its own package.
-"""
-HEAD_BROKEN = """\
-gozar: the package is installed but incomplete — a module inside it is missing.
-   Reinstall it with the interpreter this launcher uses (below).
-"""
+HEAD_MISSING = "gozar: installed, but this launcher cannot import its own package."
+HEAD_BROKEN = ("gozar: the package is installed but incomplete — a module inside "
+               "it is missing.\n   Reinstall it with the interpreter this "
+               "launcher uses (below).")
 
 
 def _explain(exc):
