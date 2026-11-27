@@ -1,18 +1,43 @@
-"""Resolve the sing-box binary from multiple locations."""
+"""engines — find (or fetch) the sing-box binary sing-box needs to test nodes.
+
+Resolution order, best first. Every step is cheap and safe; nothing here ever
+downloads inside a test loop.
+
+  0. GOZAR_SINGBOX / SINGBOX_BIN      explicit, always wins
+  1. ~/.local/share/gozar/engines/    what `gozar engine install` writes
+  2. sing-box-bin (pip package)       `pip install sing-box-bin` -> get_bin_path()
+  3. ./engines/sing-box               a git checkout that ran install.sh
+  4. PATH, ~/.local/bin, /usr/local/bin, /usr/bin, /opt/sing-box
+
+Why the pip package is in the list: it turns "download a 40MB binary from a
+GitHub release, match your arch, chmod it" into `pip install sing-box-bin`.
+It is a third-party repackaging of the official SagerNet release, so it is
+used when present but never required, and doctor says which one it found.
+"""
 from __future__ import annotations
+
 import os
+import platform
 import shutil
 import stat
+import sys
+import tarfile
+import tempfile
+import urllib.request
 from pathlib import Path
 
-# Where a downloaded engine lives. Two layouts are supported:
-#   * a git checkout:  <repo>/engines/sing-box        (next to the package)
-#   * a pip install:   ~/.local/share/gozar/engines/  (the package dir is
-#     site-packages, which must never be written to)
-ENGINE_DIR = Path(__file__).resolve().parent.parent / "engines"
-if "site-packages" in str(ENGINE_DIR) or "dist-packages" in str(ENGINE_DIR):
-    ENGINE_DIR = (Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share")
-                  / "gozar" / "engines")
+# Where a downloaded engine lives. A pip install must never write into
+# site-packages, so the user data dir is used there instead.
+_HERE = Path(__file__).resolve().parent.parent
+ENGINE_DIR = _HERE / "engines"
+# site-packages (pip) and .pyz (single-file zipapp) are both read-only homes:
+# engines must go to the user data dir in those cases.
+_INSTALLED = any(k in str(_HERE) for k in ("site-packages", "dist-packages"))
+if Path(sys.argv[0]).suffix == ".pyz" or ".pyz" in str(_HERE):
+    _INSTALLED = True
+if _INSTALLED:
+    ENGINE_DIR = (Path(os.environ.get("XDG_DATA_HOME")
+                       or Path.home() / ".local" / "share") / "gozar" / "engines")
 
 _SEARCH_PATHS = [
     ENGINE_DIR,
@@ -22,6 +47,17 @@ _SEARCH_PATHS = [
     Path("/usr/bin"),
     Path("/opt/sing-box"),
 ]
+
+# What a user can type when nothing is found. Kept in one place so doctor,
+# the CLI pre-flight and the README cannot drift apart.
+INSTALL_HINTS = """\
+gozar needs the sing-box binary (it does the real testing). Pick one:
+
+  1. pip install sing-box-bin          # easiest, no root, ~130MB wheel
+  2. gozar engine install              # downloads the official release (~40MB)
+  3. bash install.sh                   # same download, from a git checkout
+  4. sudo apt install sing-box          # or your distro's package
+  5. export GOZAR_SINGBOX=/path/to/sing-box   # use a binary you already have"""
 
 
 def _ensure_executable(path: Path) -> None:
@@ -33,10 +69,22 @@ def _ensure_executable(path: Path) -> None:
         pass
 
 
+def _from_pip_package() -> Path | None:
+    """sing-box-bin ships the official binaries for linux/mac/windows."""
+    try:
+        from sing_box_bin import get_bin_path       # type: ignore
+    except Exception:
+        return None
+    try:
+        p = Path(get_bin_path())
+        return p if p.exists() else None
+    except Exception:
+        # e.g. unsupported architecture — fall through to the other sources
+        return None
+
+
 def find_binary(name: str) -> Path | None:
-    """Locate a binary by checking env override, engines/, PATH, install dirs."""
-    # 0) explicit environment override (used by tools/devtest.sh to keep
-    #    the heavy binary in /tmp instead of the workspace)
+    """Locate a binary: env override, gozar engines dir, pip package, PATH."""
     env_name = name.upper().replace("-", "") + "_BIN"
     for var in (env_name, "SINGBOX_BIN" if name == "sing-box" else "", "GOZAR_SINGBOX"):
         if var:
@@ -44,16 +92,18 @@ def find_binary(name: str) -> Path | None:
             if cand and Path(cand).exists():
                 _ensure_executable(Path(cand))
                 return Path(cand)
-    # 1) bundled in engines/
+    if name == "sing-box":
+        packaged = _from_pip_package()
+        if packaged is not None:
+            _ensure_executable(packaged)
+            return packaged
     bundled = ENGINE_DIR / name
     if bundled.exists():
         _ensure_executable(bundled)
         return bundled
-    # 2) system PATH
     found = shutil.which(name)
     if found:
         return Path(found)
-    # 3) common directories
     for d in _SEARCH_PATHS:
         cand = d / name
         if cand.exists():
@@ -65,10 +115,95 @@ def find_binary(name: str) -> Path | None:
 SINGBOX = find_binary("sing-box")
 
 
+def source_of(path: Path | None) -> str:
+    """A short label for doctor: WHERE the binary came from, not just that it exists."""
+    if path is None:
+        return "not found"
+    s = str(path)
+    if "sing_box_bin" in s:
+        return "pip package sing-box-bin"
+    if s.startswith(str(ENGINE_DIR)):
+        return "gozar engines dir"
+    if s.startswith(str(Path.home() / ".local" / "bin")):
+        return "~/.local/bin"
+    for env in ("GOZAR_SINGBOX", "SINGBOX_BIN", "SINGBOX_BIN"):
+        if os.environ.get(env) and Path(os.environ[env]) == path:
+            return f"${env}"
+    return "PATH" if shutil.which("sing-box") == s else str(path.parent)
+
+
 def require_singbox() -> Path:
-    if SINGBOX is None or not SINGBOX.exists():
-        raise FileNotFoundError(
-            "sing-box binary not found. Install it with `bash install.sh` "
-            "or place it in ./engines/ , or install system-wide."
-        )
-    return SINGBOX
+    """Return the engine or explain exactly how to get one (never a bare None)."""
+    p = find_binary("sing-box")
+    if p is None:
+        raise SystemExit(
+            "gozar: sing-box was not found.\n\n" + INSTALL_HINTS + "\n")
+    return p
+
+
+# ─────────────────────── downloading the official release ────────────────
+
+_API = "https://api.github.com/repos/SagerNet/sing-box/releases/latest"
+
+
+def _arch_tag() -> str:
+    m = platform.machine().lower()
+    if sys.platform == "darwin":
+        return {"arm64": "arm64", "aarch64": "arm64"}.get(m, "amd64")
+    if m in ("x86_64", "amd64"):
+        return "amd64"
+    if m in ("aarch64", "arm64"):
+        return "arm64"
+    if m.startswith("armv"):
+        return "armv7"
+    raise SystemExit(f"gozar: unsupported architecture for a download: {m}\n"
+                     "       install sing-box yourself and set GOZAR_SINGBOX=...")
+
+
+def install_official(target_dir: Path | None = None, quiet: bool = False) -> Path:
+    """Download the official sing-box release into the gozar engines dir.
+
+    Only `gozar engine install` calls this. The test loop never does: a run must
+    not depend on GitHub being reachable mid-test.
+    """
+    import json
+
+    dest = Path(target_dir or ENGINE_DIR)
+    dest.mkdir(parents=True, exist_ok=True)
+    os_name = {"darwin": "darwin"}.get(sys.platform, "linux")
+    arch = _arch_tag()
+
+    def say(msg: str) -> None:
+        if not quiet:
+            print(msg, flush=True)
+
+    say(f"  looking up the latest sing-box release ...")
+    try:
+        with urllib.request.urlopen(_API, timeout=20) as r:
+            rel = json.load(r)
+    except Exception as e:                                   # noqa: BLE001
+        raise SystemExit(f"gozar: could not reach GitHub to find the release: {e}\n\n"
+                         + INSTALL_HINTS)
+    tag = rel.get("tag_name", "").lstrip("v")
+    asset = next((a for a in rel.get("assets", [])
+                  if f"-{os_name}-{arch}." in a["name"]), None)
+    if not asset:
+        raise SystemExit(f"gozar: release {tag} has no {os_name}-{arch} build.\n\n"
+                         + INSTALL_HINTS)
+    say(f"  downloading {asset['name']} ({asset['size'] / 1e6:.1f}MB) ...")
+    with tempfile.TemporaryDirectory() as tmp:
+        tgz = Path(tmp) / "sb.tar.gz"
+        urllib.request.urlretrieve(asset["browser_download_url"], tgz)
+        with tarfile.open(tgz) as tf:
+            member = next((m for m in tf.getmembers()
+                           if m.name.endswith("/sing-box") or m.name == "sing-box"), None)
+            if member is None:
+                raise SystemExit("gozar: the archive did not contain a sing-box binary")
+            member.name = "sing-box"          # flatten: no nested dirs
+            tf.extract(member, Path(tmp) / "out")
+        out = Path(tmp) / "out" / "sing-box"
+        final = dest / "sing-box"
+        shutil.move(str(out), final)
+    final.chmod(final.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    say(f"  installed: {final}")
+    return final

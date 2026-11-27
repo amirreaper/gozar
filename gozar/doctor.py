@@ -227,15 +227,15 @@ def run_doctor(cfg):
         issues += 1
 
     # 3. sing-box
-    # Resolve exactly the way the runner will: engines/ -> $SINGBOX_BIN /
-    # $RAHYAB_SINGBOX -> PATH -> common dirs. Checking one path while the
-    # runner uses another is how a working install gets reported as MISSING
-    # (a Nix profile path is neither the bundled engines/ dir nor on PATH).
-    from .engines import find_binary
+    # Doctor asks the SAME resolver the runner uses (env override -> gozar
+    # engines dir -> pip sing-box-bin -> PATH -> common dirs). Checking one path
+    # while the runner uses another is how a working install gets reported as
+    # MISSING (a Nix profile path is neither engines/ nor on PATH), and how a
+    # missing one gets reported as fine.
+    from .engines import find_binary, source_of
     _sb = find_binary("sing-box")
     if _sb and Path(_sb).exists():
-        _bundled = str(_sb).startswith(str(Path(__file__).resolve().parent.parent))
-        _ok(f"sing-box{'' if _bundled else ' (system)'}: {_sb}")
+        _ok(f"sing-box ({source_of(_sb)}): {_sb}")
         try:
             import subprocess
             v = subprocess.run([str(_sb), "version"], capture_output=True,
@@ -245,8 +245,10 @@ def run_doctor(cfg):
         except Exception:
             pass
     else:
-        _fail("sing-box not found. Run: bash install.sh "
-              "(or set SINGBOX_BIN=/path/to/sing-box)")
+        from .engines import INSTALL_HINTS
+        _fail("sing-box not found — it does the real testing, nothing runs without it")
+        for line in INSTALL_HINTS.splitlines():
+            print("        " + line if line.strip() else line)
         issues += 1
 
     # 4. ulimit

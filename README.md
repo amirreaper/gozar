@@ -41,11 +41,41 @@ proxyfinder/
     └── checker.py          # tcp_ping, udp_quic_ping, baseline, classify, exit-IP proof utils
 ```
 
+## Five ways to install — pick one
+
+| # | for whom | command |
+|---|---|---|
+| 1 | **just try it, one file** | `curl -LO https://github.com/amirreaper/gozar/releases/latest/download/gozar.pyz` → `chmod +x gozar.pyz` → `./gozar.pyz engine install` |
+| 2 | **user install, no clone** | `pip install gozar` |
+| 3 | **pip + the engine in one go** | `pip install "gozar[engine]"` |
+| 4 | **from git, keep it editable** | `pip install git+https://github.com/amirreaper/gozar.git` |
+| 5 | **developer checkout** | `git clone` → `bash install.sh --venv` → `./cli` |
+
+Whichever you pick, the first command is the same check:
+
+```bash
+gozar engine status        # or ./cli engine status in a checkout
+```
+
+`gozar` (pronounced *gozar*, "the passage") tests nodes with **sing-box**, a Go
+binary. It is the one thing pip cannot carry, so `gozar engine install` fetches
+the official release into `~/.local/share/gozar/engines/` (~40MB, no root,
+checked when you run it — never in the middle of a test).
+
+If you already have sing-box somewhere: `export GOZAR_SINGBOX=/path/to/sing-box`.
+If you want pip to carry it: `pip install sing-box-bin` (a third-party repackage
+of the official binaries — convenient, and `gozar engine status` tells you which
+source it picked).
+
+**Exit codes:** `0` good · `2` cannot run (no engine, bad usage) · `3` ran, nothing
+passed · `130` stopped with Ctrl+C.
+
 ## Install & prerequisites
 
 ```bash
-bash install.sh            # downloads sing-box for your arch, creates .venv
-python -m proxyfinder doctor --help
+bash install.sh              # engine only: downloads sing-box into ./engines
+bash install.sh --venv       # + a local .venv with aiohttp/aiohttp-socks
+./cli doctor                 # proves engine + deps + a live test
 ```
 
 NixOS / anything with nix:

@@ -7,6 +7,34 @@
 
 ---
 
+## پنج راه نصب — یکی را انتخاب کن
+
+| # | برای چه کسی | دستور |
+|---|---|---|
+| ۱ | **فقط می‌خواهم امتحان کنم، یک فایل** | `curl -LO https://github.com/amirreaper/gozar/releases/latest/download/gozar.pyz` → `chmod +x gozar.pyz` → `./gozar.pyz engine install` |
+| ۲ | **نصب کاربری، بدون کلون** | `pip install gozar` |
+| ۳ | **پکیج + موتور با هم** | `pip install "gozar[engine]"` |
+| ۴ | **از گیت، قابل ویرایش** | `pip install git+https://github.com/amirreaper/gozar.git` |
+| ۵ | **چک‌اوت توسعه** | `git clone` → `bash install.sh --venv` → `./cli` |
+
+هر کدام را که انتخاب کردی، اولین دستور یکی است:
+
+```bash
+gozar engine status        # در چک‌اوت:  ./cli engine status
+```
+
+`gozar` نودها را با **sing-box** تست می‌کند که یک باینری Go است — تنها چیزی که
+pip نمی‌تواند حملش کند. `gozar engine install` نسخهٔ رسمی را در
+`~/.local/share/gozar/engines/` می‌گذارد (~۴۰MB، بدون root). بررسی موتور
+**یک‌بار** انجام می‌شود، نه وسط تست.
+
+اگر sing-box را جای دیگری داری: `export GOZAR_SINGBOX=/path/to/sing-box`
+اگر می‌خواهی pip خودش بیاوردش: `pip install sing-box-bin` (بستهٔ شخص ثالث از همان
+باینری رسمی — راحت است، و `gozar engine status` می‌گوید کدام منبع را انتخاب کرده).
+
+**کد خروج:** `0` سالم · `2` اجرا نشد (موتور نیست، استفادهٔ غلط) · `3` اجرا شد ولی
+هیچ نودی قبول نشد · `130` با Ctrl+C متوقف شد.
+
 ## نصب و پیش‌نیازها
 
 ### روش ساده — لانچر `./bot`

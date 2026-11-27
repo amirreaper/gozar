@@ -1,0 +1,65 @@
+name: release
+
+# Two things happen on a version tag:
+#   1. a single-file gozar.pyz is attached to the GitHub release
+#   2. the wheel + sdist are published to PyPI
+# Both use the tag that is already in the repo, so the version in pyproject.toml
+# and the tag must agree — the first job fails if they do not.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write          # to create the release and upload the pyz
+
+jobs:
+  check-version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: tag and pyproject must agree
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          ver="$(python3 -c "import tomllib,pathlib;print(tomllib.loads(pathlib.Path('pyproject.toml').read_text())['project']['version'])")"
+          echo "tag=$tag  pyproject=$ver"
+          [ "$tag" = "$ver" ] || { echo "::error::tag $tag != pyproject version $ver"; exit 1; }
+
+  pyz:
+    needs: check-version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: run the contract suite first
+        run: |
+          python -m pip install -q aiohttp aiohttp-socks
+          python tests/test_contracts.py
+      - name: build the single file
+        run: python gozar.pyz.py
+      - name: attach it to the release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/gozar.pyz
+          generate_release_notes: true
+
+  pypi:
+    needs: check-version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: python -m pip install -q build twine
+      - run: python -m build
+      - run: python -m twine check dist/*
+      # Set PYPI_API_TOKEN in Settings -> Secrets -> Actions.
+      # Without the secret this step is skipped, so forks do not fail.
+      - name: upload to PyPI
+        if: ${{ env.TWINE_USERNAME != '' }}
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+          TWINE_REPOSITORY: pypi
+        run: python -m twine upload dist/*

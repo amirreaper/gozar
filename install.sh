@@ -1,48 +1,69 @@
 #!/usr/bin/env bash
-# Install the engines this tool needs (sing-box only).
-# Usage:  bash install.sh
+# install.sh — get gozar working from a git checkout.
+#
+#   bash install.sh                 # engine only (the fast path, what most people want)
+#   bash install.sh --venv          # + a local .venv with the two dependencies
+#   bash install.sh --system        # + pip install --user (gozar on PATH)
+#
+# Rules this script follows:
+#   * it never overwrites a working engine
+#   * it never needs root
+#   * when it cannot do something, it prints the exact command instead of failing
 set -euo pipefail
+cd "$(dirname "$0")"
 
-ENGINE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/engines"
-mkdir -p "$ENGINE_DIR"
+WANT_VENV=0; WANT_SYSTEM=0
+for a in "$@"; do
+  case "$a" in
+    --venv) WANT_VENV=1 ;;
+    --system) WANT_SYSTEM=1 ;;
+    -h|--help) sed -n '2,12p' "$0"; exit 0 ;;
+    *) echo "unknown option: $a" >&2; exit 2 ;;
+  esac
+done
 
+say() { printf "==> %s\n" "$*"; }
 have() { command -v "$1" >/dev/null 2>&1; }
 
-echo "==> Detecting CPU architecture..."
-OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
-ARCH_RAW="$(uname -m)"
-case "$ARCH_RAW" in
-  x86_64|amd64) ARCH="amd64" ;;
-  aarch64|arm64) ARCH="arm64" ;;
-  armv7l) ARCH="armv7" ;;
-  *) echo "Unsupported architecture: $ARCH_RAW"; exit 1 ;;
-esac
-echo "    OS=$OS  ARCH=$ARCH"
+# 1) python
+PY="${PYTHON:-python3}"
+have "$PY" || { echo "ERROR: python3 is required (3.10 or newer)" >&2; exit 2; }
+"$PY" - <<'PY' || { echo "ERROR: python 3.10+ is required" >&2; exit 2; }
+import sys
+raise SystemExit(0 if sys.version_info >= (3, 10) else 1)
+PY
+say "python: $("$PY" -V)"
 
-# ─────────────────────────── sing-box ───────────────────────────
-install_singbox() {
-  if [ -x "$ENGINE_DIR/sing-box" ]; then
-    echo "==> sing-box already present: $("$ENGINE_DIR/sing-box" version | head -1)"
-    return
-  fi
-  if have sing-box; then
-    ln -sf "$(command -v sing-box)" "$ENGINE_DIR/sing-box"
-    echo "==> Using the sing-box already installed on this system."
-    return
-  fi
-  echo "==> Downloading the latest sing-box..."
-  TAG="$(curl -fsSL https://api.github.com/repos/SagerNet/sing-box/releases/latest | grep -oP '"tag_name":\s*"\K[^"]+')"
-  VER="${TAG#v}"
-  URL="https://github.com/SagerNet/sing-box/releases/download/${TAG}/sing-box-${VER}-${OS}-${ARCH}.tar.gz"
-  echo "    $URL"
-  TMP="$(mktemp -d)"
-  curl -fL --retry 3 -o "$TMP/sb.tar.gz" "$URL"
-  tar -xzf "$TMP/sb.tar.gz" -C "$TMP"
-  find "$TMP" -name sing-box -type f -exec cp {} "$ENGINE_DIR/sing-box" \;
-  chmod +x "$ENGINE_DIR/sing-box"
-  rm -rf "$TMP"
-  echo "==> sing-box installed: $("$ENGINE_DIR/sing-box" version | head -1)"
-}
+# 2) dependencies
+if "$PY" -c "import aiohttp, aiohttp_socks" >/dev/null 2>&1; then
+  say "dependencies: already available"
+elif [ "$WANT_VENV" = 1 ]; then
+  say "creating .venv and installing the two dependencies"
+  "$PY" -m venv .venv
+  ./.venv/bin/pip install -q -r requirements.txt
+  say "dependencies: installed in .venv (the ./cli launcher picks it up)"
+elif [ "$WANT_SYSTEM" = 1 ]; then
+  say "installing gozar with pip --user"
+  "$PY" -m pip install --user -q -e . 2>/dev/null || "$PY" -m pip install --user -q aiohttp aiohttp-socks
+else
+  cat <<'MSG'
+    dependencies: NOT installed (aiohttp, aiohttp-socks)
+      bash install.sh --venv        # local .venv, nothing system-wide
+      bash install.sh --system      # pip install --user
+      pip install gozar             # or just use the packaged version
+MSG
+fi
 
-# Only sing-box is installed. xray was dropped in v1.8.0 (34MB that nothing
-# read), and the DPI/fragment layer that needed extra binaries is gone too.
+# 3) the engine
+say "checking the testing engine (sing-box)"
+"$PY" -m gozar engine status || true
+if ! "$PY" -m gozar engine status >/dev/null 2>&1; then
+  say "downloading the official sing-box release into ./engines"
+  "$PY" -m gozar engine install --to "$(pwd)/engines" || {
+    echo "    could not download. Alternatives:" >&2
+    echo "      pip install sing-box-bin" >&2
+    echo "      export GOZAR_SINGBOX=/path/to/sing-box" >&2
+  }
+fi
+
+say "done — try:  ./cli --version   and   ./cli doctor"

@@ -342,7 +342,25 @@ def load_or_reset_state(cfg, state_path):
     return store.load(state_path)
 
 
+def _require_engine():
+    """Fail before a run starts, not after 1,400 nodes were probed.
+
+    Without this, a machine with no sing-box spent minutes fetching and probing
+    candidates and then reported "0 nodes alive" — the tool blaming the pool for
+    a missing dependency. Exit code 2 = "cannot run", distinct from 3 = "ran,
+    nothing passed" and 0 = "good".
+    """
+    from . import engines as E
+    found = E.find_binary("sing-box")
+    if found is not None:
+        return found
+    log.error("the testing engine (sing-box) is not installed — nothing can be tested")
+    print("\n" + E.INSTALL_HINTS + "\n", file=sys.stderr)
+    raise SystemExit(2)
+
+
 def cmd_discover(cfg):
+    _require_engine()
     data, sp = _paths(cfg)
     ct.data_dir_hint[0] = data            # breakers + source stats live here
     state = load_or_reset_state(cfg, sp)
@@ -382,6 +400,7 @@ def cmd_discover(cfg):
 
 
 def cmd_check(cfg, drop_dead=False):
+    _require_engine()
     data, sp = _paths(cfg)
     ct.data_dir_hint[0] = data            # check-phase breakers are journaled too
     state = store.load(sp)
@@ -476,6 +495,7 @@ def cmd_loop(cfg):
 
 def cmd_run(cfg, n, mode, port, force):
     """Find at least N good nodes, verify them, then connect."""
+    _require_engine()
     data, sp = _paths(cfg)
     state = store.load(sp)
     require_target = bool(cfg.get("targets"))
@@ -591,6 +611,7 @@ def cmd_run(cfg, n, mode, port, force):
 
 def cmd_connect(cfg, mode, port, pin, source, pretest=True,
                 allow_no_target=False):
+    _require_engine()
     # short fuse: if the node list is untested in this session, run a quick
     # probe against the candidates so a dead node never reaches urltest
     if pretest:
@@ -1047,6 +1068,9 @@ def cmd_status(cfg):
 
 
 def cmd_verify(cfg, port=None, source="best", count=10, targets=None):
+    if port is None:
+        # verifying an already-running proxy does not need the engine
+        _require_engine()
     """Prove whether nodes REALLY tunnel traffic (exit-IP proof).
 
     Two modes:
@@ -1261,6 +1285,46 @@ def _print_curl_hint(port, tgts, ua):
           f"# without -A you get HTTP 403 + cf-mitigated: challenge — that is "
           f"Cloudflare\n    # blocking curl, NOT a broken node. Compare:"))
     print("    " + D.c(D.CYN, f"curl -x socks5h://127.0.0.1:{port} -I {tgts[0]}"))
+
+
+# ─────────────────────────── engine management ───────────────────────────
+
+def cmd_engine(cfg, action="status", target=None, quiet=False):
+    """`gozar engine status|install` — find or fetch the sing-box binary.
+
+    A clone of this repo carries no binary (engines/ is git-ignored: it is 40MB).
+    So "I cloned it, what now" has to be one command, and it has to tell the
+    user exactly which of the four ways to get an engine they are using.
+    """
+    from . import engines as E
+
+    found = E.find_binary("sing-box")
+    if action == "status":
+        if found is None:
+            print("  engine : not found")
+            print()
+            print(E.INSTALL_HINTS)
+            return 2
+        print(f"  engine : {found}")
+        print(f"  source : {E.source_of(found)}")
+        v = None
+        try:
+            import subprocess
+            out = subprocess.run([str(found), "version"], capture_output=True,
+                                 text=True, timeout=10).stdout.splitlines()
+            v = out[0] if out else None
+        except Exception:                                    # noqa: BLE001
+            pass
+        print(f"  version: {v or 'could not run it'}")
+        return 0 if v else 2
+    if action == "install":
+        dest = Path(target) if target else E.ENGINE_DIR
+        print(f"  target : {dest}")
+        path = E.install_official(dest, quiet=quiet)
+        print(f"  ready  : {path}")
+        return 0
+    log.error("unknown engine action: %s (use status or install)", action)
+    return 2
 
 
 # ─────────────────────────── argument parser ───────────────────────────
@@ -1614,6 +1678,16 @@ def build_parser():
                    help="Run diagnostics (binary, packages, sources, ping, sample test)",
                    description="Checks that the bot and its dependencies are installed "
                                "correctly and performs a small live connectivity test.")
+
+    eng = sub.add_parser("engine", parents=[common],
+                         help="Check or install the sing-box binary",
+                         description="Where the testing engine comes from, and how to "
+                                     "get it if it is missing. `install` downloads "
+                                     "the official release into the gozar data dir.")
+    eng.add_argument("engine_action", nargs="?", default="status",
+                     choices=["status", "install"], help="status (default) or install")
+    eng.add_argument("--to", dest="engine_dir", metavar="DIR",
+                     help="install into DIR instead of the default data dir")
     return p
 
 
@@ -1728,6 +1802,10 @@ def main(argv=None):
                           config_path=(getattr(args, "cfg_out", None)
                                        or getattr(args, "config", None) or _DC),
                           doctor_hint=bool(getattr(args, "cfg_doctor", False)))
+    elif args.cmd == "engine":
+        return cmd_engine(cfg, action=args.engine_action,
+                          target=getattr(args, "engine_dir", None),
+                          quiet=getattr(args, "quiet", False))
     elif args.cmd == "doctor":
         return doctor.run_doctor(cfg)
     return 0

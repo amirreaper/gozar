@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gozar"
-version = "2.0.0"
+version = "2.1.0"
 description = "Find, test and keep a working pool of free public proxy configs, then connect through the best of them."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -27,7 +27,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["setuptools>=68", "build"]
+# `pip install "gozar[engine]"` pulls a wheel that bundles the official sing-box
+# binaries. Optional on purpose: it is ~130MB, and a machine that already has
+# sing-box on PATH should not pay for it.
+engine = ["sing-box-bin>=1.10"]
+dev = ["setuptools>=68", "build", "twine"]
 
 [project.scripts]
 gozar = "gozar.bot:cli"

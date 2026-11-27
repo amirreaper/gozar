@@ -1035,6 +1035,46 @@ def t_sigint_is_bounded() -> None:
     check("feedback is printed before the cancel",
           ct_src.index("Ctrl+C received") < ct_src.index("task.cancel()"))
 
+# ─────────────────── 27) how people actually install this ───────────────────
+def t_install_paths() -> None:
+    """Five documented ways in, and none of them may end in a silent "0 nodes".
+
+    The 2026-11-27 report: an installed copy found no engine, spent minutes
+    probing 1,400 candidates and finished with "0 alive" — the tool blamed the
+    pool for a missing dependency. Each check below pins one way that must work.
+    """
+    print("\n27) the ways to get an engine, and the failure that must not happen")
+    from gozar import engines as E
+
+    check("an env override is honoured first", "GOZAR_SINGBOX" in E.INSTALL_HINTS)
+    check("the pip package sing-box-bin is consulted", "_from_pip_package" in
+          (ROOT / "gozar" / "engines.py").read_text())
+    check("the single-file pyz installs into the user data dir, not the archive",
+          ".pyz" in (ROOT / "gozar" / "engines.py").read_text())
+    check("there is a command that installs the official release",
+          "install_official" in (ROOT / "gozar" / "engines.py").read_text()
+          and "def cmd_engine" in (ROOT / "gozar" / "bot.py").read_text())
+    check("every hint a user sees is written once, in one place",
+          "INSTALL_HINTS" in (ROOT / "gozar" / "engines.py").read_text()
+          and "INSTALL_HINTS" in (ROOT / "gozar" / "doctor.py").read_text())
+
+    # the regression that matters: discover must not run without an engine
+    src = (ROOT / "gozar" / "bot.py").read_text()
+    for fn in ("def cmd_discover", "def cmd_check", "def cmd_connect", "def cmd_run"):
+        seg = src[src.index(fn):]
+        seg = seg[:seg.index("\ndef ")]
+        check(f"{fn.split()[-1]} refuses to start without an engine",
+              "_require_engine()" in seg)
+    check("the refusal exits 2 (cannot run), not 0 or 3",
+          "raise SystemExit(2)" in src[src.index("def _require_engine"):][:1200])
+
+    # a pyz build must exist as a first-class artefact
+    check("a single-file build script ships with the project",
+          (ROOT / "gozar.pyz.py").exists())
+    check("install.sh no longer guesses the engine by hand",
+          "engine install" in (ROOT / "install.sh").read_text())
+
+
 def main() -> int:
     print("=" * 70)
     print(" gozar — node selection and retention contract")
@@ -1068,6 +1108,7 @@ def main() -> int:
     t_crash_regressions()
     t_target_detection()
     t_sigint_is_bounded()
+    t_install_paths()
     print("\n" + "=" * 70)
     print(f"  PASS: {len(PASSES)}   FAIL: {len(FAILS)}")
     for f in FAILS:
