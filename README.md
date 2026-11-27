@@ -193,6 +193,7 @@ only path that wants root.
 ## Quick start
 
 ```bash
+gozar selfcheck                       # first: did the install land intact?
 gozar doctor                          # env + sources + baseline + targets
 gozar discover -t https://example.com/ -t https://www.gstatic.com/generate_204 -n 30
 gozar run 5                           # find 5, verify, interactive picker, connect
