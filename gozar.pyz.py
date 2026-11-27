@@ -36,7 +36,7 @@ def main() -> int:
         sys.stderr.write(
             "gozar: this build needs its two dependencies:\\n"
             "    pip install aiohttp aiohttp-socks\\n"
-            "or install properly:  pip install gozar\\n")
+            "or install from git:  pip install git+https://github.com/amirreaper/gozar.git\\n")
         return 2
     from gozar.bot import main as _main
     return _main(sys.argv[1:])

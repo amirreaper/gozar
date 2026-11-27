@@ -61,9 +61,9 @@ async def run_connect(data_dir: Path, mode: str = "proxy", port: int = 2080,
                     log.error("No target-OK nodes available (%d 'gen' nodes exist but "
                               "they did not pass your targets).",
                               len(gen_r))
-                    log.info("Options: run `bot check` / `bot discover`, "
+                    log.info("Options: run `gozar check` / `gozar discover`, "
                              "or connect to the gen pool explicitly with "
-                             "`bot connect --from gen` (or pass --allow-no-target).")
+                             "`gozar connect --from gen` (or pass --allow-no-target).")
                     return 4
     if not recs:
         log.error("No working nodes available. Run discover first.")
@@ -108,7 +108,7 @@ async def run_connect(data_dir: Path, mode: str = "proxy", port: int = 2080,
         cfg_path.write_text(json.dumps(sb_cfg, ensure_ascii=False, indent=1), encoding="utf-8")
 
         if mode == "tun" and os.geteuid() != 0:
-            log.warning("TUN mode requires root: sudo -E python -m gozar.bot connect --mode tun")
+            log.warning("TUN mode requires root: sudo -E gozar connect --mode tun")
 
         print("=" * 64)
         print(f"  Connecting: {label}")

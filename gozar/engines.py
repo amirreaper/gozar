@@ -51,13 +51,15 @@ _SEARCH_PATHS = [
 # What a user can type when nothing is found. Kept in one place so doctor,
 # the CLI pre-flight and the README cannot drift apart.
 INSTALL_HINTS = """\
-gozar needs the sing-box binary (it does the real testing). Pick one:
+gozar needs the sing-box binary (it does the real testing). Short version:
 
-  1. pip install sing-box-bin          # easiest, no root, ~130MB wheel
-  2. gozar engine install              # downloads the official release (~40MB)
-  3. bash install.sh                   # same download, from a git checkout
-  4. sudo apt install sing-box          # or your distro's package
-  5. export GOZAR_SINGBOX=/path/to/sing-box   # use a binary you already have"""
+  gozar engine install                # download it here (recommended)
+  pip install sing-box-bin            # or let pip carry it
+  export GOZAR_SINGBOX=/path/to/sing-box
+
+No network at all? Then one of:
+  sudo apt install sing-box | sudo dnf install sing-box | nix profile install nixpkgs#sing-box
+  (any sing-box on PATH is found automatically)"""
 
 
 def _ensure_executable(path: Path) -> None:
@@ -115,6 +117,27 @@ def find_binary(name: str) -> Path | None:
 SINGBOX = find_binary("sing-box")
 
 
+def first_version_line(binary) -> str | None:
+    """`sing-box version 1.14.5`, or None if the binary will not run.
+
+    The single place that asks a binary what it is. doctor, `engine status` and
+    the post-install proof all print the same first line because they all call
+    this — before, each one ran its own subprocess and formatted it differently.
+    """
+    if not binary:
+        return None
+    try:
+        import subprocess
+        out = subprocess.run([str(binary), "version"], capture_output=True,
+                             text=True, timeout=10).stdout
+    except Exception:                                    # noqa: BLE001
+        return None
+    for line in (out or "").splitlines():
+        if line.strip():
+            return line.strip()
+    return None
+
+
 def source_of(path: Path | None) -> str:
     """A short label for doctor: WHERE the binary came from, not just that it exists."""
     if path is None:
@@ -160,6 +183,28 @@ def _arch_tag() -> str:
                      "       install sing-box yourself and set GOZAR_SINGBOX=...")
 
 
+def confirm_install(assume_yes: bool = False) -> bool:
+    """Ask before a 32MB download. Non-interactive runs need --yes.
+
+    `assume_yes` answers the question for the user; it does not touch how much
+    is printed (that is `quiet`). Two different intents, two different flags.
+    """
+    if assume_yes:
+        return True
+    import sys
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        # a pipe or a script: say what to do instead of hanging on input()
+        print("gozar: not downloading without confirmation. Re-run with "
+              "`gozar engine install --yes`, or `pip install sing-box-bin`.")
+        return False
+    try:
+        ans = input(f"  download sing-box (~32MB) into {ENGINE_DIR}? [Y/n] ")
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return False
+    return ans.strip().lower() in ("", "y", "yes")
+
+
 def install_official(target_dir: Path | None = None, quiet: bool = False) -> Path:
     """Download the official sing-box release into the gozar engines dir.
 
@@ -173,11 +218,16 @@ def install_official(target_dir: Path | None = None, quiet: bool = False) -> Pat
     os_name = {"darwin": "darwin"}.get(sys.platform, "linux")
     arch = _arch_tag()
 
-    def say(msg: str) -> None:
-        if not quiet:
+    def say(msg: str, status: str | None = None) -> None:
+        if quiet:
+            return
+        if status:
+            from . import core_ui as U
+            U.say(status, msg.strip())
+        else:
             print(msg, flush=True)
 
-    say(f"  looking up the latest sing-box release ...")
+    say("looking up the latest sing-box release ...")
     try:
         with urllib.request.urlopen(_API, timeout=20) as r:
             rel = json.load(r)
@@ -190,7 +240,7 @@ def install_official(target_dir: Path | None = None, quiet: bool = False) -> Pat
     if not asset:
         raise SystemExit(f"gozar: release {tag} has no {os_name}-{arch} build.\n\n"
                          + INSTALL_HINTS)
-    say(f"  downloading {asset['name']} ({asset['size'] / 1e6:.1f}MB) ...")
+    say(f"downloading {asset['name']} ({asset['size'] / 1e6:.1f}MB) ...")
     with tempfile.TemporaryDirectory() as tmp:
         tgz = Path(tmp) / "sb.tar.gz"
         urllib.request.urlretrieve(asset["browser_download_url"], tgz)
@@ -205,5 +255,15 @@ def install_official(target_dir: Path | None = None, quiet: bool = False) -> Pat
         final = dest / "sing-box"
         shutil.move(str(out), final)
     final.chmod(final.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
-    say(f"  installed: {final}")
+    say(f"installed: {final}", "ok")
+    # prove it runs BEFORE telling the user we are done: a downloaded binary
+    # that cannot execute (wrong arch, blocked loader) must not look like success
+    try:
+        import subprocess
+        v = subprocess.run([str(final), "version"], capture_output=True,
+                           text=True, timeout=10).stdout.strip().splitlines()
+        say(f"works: {v[0] if v else 'ran, but printed nothing'}", "ok")
+    except Exception as e:                                   # noqa: BLE001
+        raise SystemExit(f"gozar: downloaded {final} but it will not run: {e}\n"
+                         "       try: pip install sing-box-bin")
     return final

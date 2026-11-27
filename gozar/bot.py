@@ -1289,6 +1289,55 @@ def _print_curl_hint(port, tgts, ua):
 
 # ─────────────────────────── engine management ───────────────────────────
 
+def _help_text() -> str:
+    """Bytes, not str: avoids the cp1252 crash on a Windows console."""
+    return build_parser().format_help()
+
+
+def _show_help_friendly() -> int:
+    """Bare `gozar` should rarely be a bare traceback.
+
+    Two real cases from 2026-11-27:
+      * pip refuses to install a SECOND top-level command called `cli`
+        (the dev launcher was named that), so one path died before main();
+      * a fresh user types `gozar` and gets usage text with exit 2, which reads
+        like an error. Terse help + 0 here, full help behind -h.
+    """
+    out = [
+        "gozar — find, test and connect through public proxy nodes",
+        "",
+        "  gozar engine install        get the sing-box binary (do this once)",
+        "  gozar discover -n 20 -t https://example.com/",
+        "  gozar verify                prove the stored nodes really tunnel",
+        "  gozar connect               local proxy on :2080",
+        "",
+        "  gozar -h                    every command, every flag",
+        "",
+    ]
+    from . import APP_NAME, __version__
+    out.append(f"  {APP_NAME} {__version__}")
+    sys.stdout.write("\n".join(out) + "\n")
+    return 0
+
+
+def _flag(cfg, name, default=False):
+    """Read a private run-flag (`_engine_force`, `_reset_requested`, ...).
+
+    cfg is a dict everywhere in gozar, but a couple of code paths and older
+    call sites hand in an object. Reading the dict key *or* the attribute in one
+    place means a flag can never be silently dropped again — which is exactly
+    how `--reinstall` ended up doing nothing on 2026-11-27.
+    """
+    if cfg is None:
+        return default
+    try:
+        if name in cfg:
+            return cfg[name]
+    except TypeError:                       # not a mapping
+        pass
+    return getattr(cfg, name, default)
+
+
 def cmd_engine(cfg, action="status", target=None, quiet=False):
     """`gozar engine status|install` — find or fetch the sing-box binary.
 
@@ -1319,9 +1368,32 @@ def cmd_engine(cfg, action="status", target=None, quiet=False):
         return 0 if v else 2
     if action == "install":
         dest = Path(target) if target else E.ENGINE_DIR
+        # An engine found *outside* our own dir (PATH, pip package, $GOZAR_SINGBOX)
+        # is somebody else's install: replacing it belongs to that tool, not to us.
+        ours = found is not None and Path(found).parent == Path(dest)
+        if ours and not _flag(cfg, "_engine_force"):
+            print(f"  already installed: {found}")
+            print("  nothing to do (use --reinstall to replace it)")
+            return 0
+        if found is not None and not ours:
+            print(f"  found another engine: {found} ({E.source_of(found)})")
+            print(f"  it is already usable — gozar prefers it. Installing a copy in {dest}")
+            print("  is only needed if you want gozar to be self-contained.")
+        if ours:
+            print(f"  replacing the copy in {dest}")
         print(f"  target : {dest}")
-        path = E.install_official(dest, quiet=quiet)
-        print(f"  ready  : {path}")
+        # --yes means "stop asking", NOT "stop talking": the download, the
+        # verification and the final binary path must still be visible.
+        assume_yes = _flag(cfg, "_engine_yes") or quiet
+        if not E.confirm_install(assume_yes=assume_yes):
+            print("  cancelled — nothing downloaded. The engine above still works.")
+            return 2
+        try:
+            E.install_official(dest, quiet=quiet)
+        except SystemExit as e:
+            print(e)
+            return 2
+        return 0
         return 0
     log.error("unknown engine action: %s (use status or install)", action)
     return 2
@@ -1674,10 +1746,17 @@ def build_parser():
                     metavar="FILE", help="file to read/write (default: the -c "
                                          "config this run uses)")
 
-    sub.add_parser("doctor", parents=[common],
-                   help="Run diagnostics (binary, packages, sources, ping, sample test)",
-                   description="Checks that the bot and its dependencies are installed "
-                               "correctly and performs a small live connectivity test.")
+    doc = sub.add_parser("doctor", parents=[common],
+                         help="Run diagnostics (binary, packages, sources, ping, sample test)",
+                         description="Checks that the bot and its dependencies are "
+                                     "installed correctly and performs a small live "
+                                     "connectivity test. Every check has a name; "
+                                     "`--only` runs just one of them.")
+    doc.add_argument("--only", metavar="CHECK", default=None,
+                     help="run a single check (python, packages, engine, limits, "
+                          "data, root, sources, sample, own_ip, targets)")
+    doc.add_argument("--list-checks", dest="list_checks", action="store_true",
+                     help="print the check names and exit")
 
     eng = sub.add_parser("engine", parents=[common],
                          help="Check or install the sing-box binary",
@@ -1688,6 +1767,10 @@ def build_parser():
                      choices=["status", "install"], help="status (default) or install")
     eng.add_argument("--to", dest="engine_dir", metavar="DIR",
                      help="install into DIR instead of the default data dir")
+    eng.add_argument("--yes", dest="engine_yes", action="store_true",
+                     help="do not ask before downloading")
+    eng.add_argument("--reinstall", dest="engine_force", action="store_true",
+                     help="replace an engine that is already present")
     return p
 
 
@@ -1721,8 +1804,7 @@ def main(argv=None):
         print(f"{APP_NAME} {__version__}")
         return 0
     if not getattr(args, "cmd", None):
-        build_parser().print_help()
-        return 2
+        return _show_help_friendly()
     _level = (logging.DEBUG if args.verbose
               else (logging.WARNING if getattr(args, "quiet", False)
                     else logging.INFO))
@@ -1803,11 +1885,19 @@ def main(argv=None):
                                        or getattr(args, "config", None) or _DC),
                           doctor_hint=bool(getattr(args, "cfg_doctor", False)))
     elif args.cmd == "engine":
+        cfg["_engine_yes"] = bool(getattr(args, "engine_yes", False))
+        cfg["_engine_force"] = bool(getattr(args, "engine_force", False))
         return cmd_engine(cfg, action=args.engine_action,
                           target=getattr(args, "engine_dir", None),
-                          quiet=getattr(args, "quiet", False))
+                          # -q silences; --yes only answers the prompt
+                          quiet=bool(getattr(args, "quiet", False)))
     elif args.cmd == "doctor":
-        return doctor.run_doctor(cfg)
+        if getattr(args, "list_checks", False):
+            from .doctor_checks import registry
+            for name, title, _fn in registry():
+                print(f"  {name:<10} {title}")
+            return 0
+        return doctor.run_doctor(cfg, only=getattr(args, "only", None))
     return 0
 
 

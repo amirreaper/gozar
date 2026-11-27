@@ -147,7 +147,7 @@ def _dur(s) -> str:
 
 def card(lines: list[tuple[str, str]], width=72, title: str = "summary") -> str:
     """Style B — boxed summary card. `lines` = [(label, value)].
-    The label column auto-sizes so long labels (e.g. `bot verify`) stay aligned."""
+    The label column auto-sizes so long labels (e.g. `gozar verify`) stay aligned."""
     out = []
     hdr = f"╭{'─'} {BOLD}{title}{RST} " if tty() else f"-- {title} "
     out.append(c(CYN, hdr) if tty() else hdr)

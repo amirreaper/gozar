@@ -146,7 +146,7 @@ def render(rec: dict, current: dict) -> str:
             + (f"  p90={rec['pool_p90']}ms" if rec.get("pool_p90") else ""))
     else:
         add("   no node has been tested on this line yet — numbers are based on line RTT + defaults")
-        add("   (run `bot discover` once, then repeat this command for exact numbers)")
+        add("   (run `gozar discover` once, then repeat this command for exact numbers)")
     add("")
     add("  ── recommendation (paste into config.json) ──")
     add(json.dumps(r, ensure_ascii=False, indent=2))

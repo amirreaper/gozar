@@ -7,20 +7,22 @@
 
 ---
 
-## پنج راه نصب — یکی را انتخاب کن
+## نصب — تا وقتی روی PyPI نیست، سه راه
 
 | # | برای چه کسی | دستور |
 |---|---|---|
-| ۱ | **فقط می‌خواهم امتحان کنم، یک فایل** | `curl -LO https://github.com/amirreaper/gozar/releases/latest/download/gozar.pyz` → `chmod +x gozar.pyz` → `./gozar.pyz engine install` |
-| ۲ | **نصب کاربری، بدون کلون** | `pip install gozar` |
-| ۳ | **پکیج + موتور با هم** | `pip install "gozar[engine]"` |
-| ۴ | **از گیت، قابل ویرایش** | `pip install git+https://github.com/amirreaper/gozar.git` |
-| ۵ | **چک‌اوت توسعه** | `git clone` → `bash install.sh --venv` → `./cli` |
+| ۱ | **فقط امتحان، یک فایل** | `curl -LO https://github.com/amirreaper/gozar/releases/latest/download/gozar.pyz` → `chmod +x gozar.pyz` → `./gozar.pyz engine install` |
+| ۲ | **از گیت، کاربری** | `pip install --user "gozar[engine] @ git+https://github.com/amirreaper/gozar.git"` |
+| ۳ | **چک‌اوت توسعه** | `git clone https://github.com/amirreaper/gozar.git && cd gozar && bash install.sh --venv` → `./gozar-dev` |
+
+> دستور `pip install gozar` **هنوز کار نمی‌کند** چون بسته روی PyPI منتشر نشده است.
+> عمداً هیچ‌جای این راهنما آن را نمی‌نویسد: راهنمایی که به دستور شکست‌خورده
+> ارجاع بدهد، از راهنمای طولانی‌تر بدتر است.
 
 هر کدام را که انتخاب کردی، اولین دستور یکی است:
 
 ```bash
-gozar engine status        # در چک‌اوت:  ./cli engine status
+gozar engine status        # در چک‌اوت:  ./gozar-dev engine status
 ```
 
 `gozar` نودها را با **sing-box** تست می‌کند که یک باینری Go است — تنها چیزی که
@@ -37,13 +39,39 @@ pip نمی‌تواند حملش کند. `gozar engine install` نسخهٔ رس�
 
 ## نصب و پیش‌نیازها
 
-### روش ساده — لانچر `./bot`
+### روش ساده — لانچر `./gozar-dev`
 
-فقط دو چیز لازم است: **پایتون ۳٫۹+** و **sing-box**. بقیه (پکیج‌های پایتونی vendored) خودشان سر جای‌شان هستند.
+فقط دو چیز لازم است: **پایتون ۳٫۱۰+** و **sing-box**. بقیه خودشان سر جای‌شان هستند.
 
 ```bash
 bash install.sh        # دفعه‌ی اول — sing-box بر اساس معماری + venv
-gozar doctor           # خودتشخیصی کامل
+./gozar-dev doctor     # خودتشخیصی کامل
+```
+
+نام لانچر `gozar-dev` است نه `cli`: اسکریپتی به نام `cli` با entry point خود
+pip هم‌نام می‌شد و pip نصب را با خطا رد می‌کرد (باگ گزارش‌شده در v2.1.1).
+
+### ماژول‌ها — سه قطعهٔ مشترک
+
+هر چیزی که دو دستور لازم داشتند، یک‌بار نوشته شده است:
+
+| فایل | کار | جایش را در کد |
+|---|---|---|
+| `gozar/core_ui.py` | واژگان مشترک: `OK/WARN/FAIL`، `say()`، `Ledger` (شمارش ایراد و کد خروج)، `wrap`، `table` | همهٔ دستورها |
+| `gozar/doctor_checks.py` | هر بررسی `doctor` یک تابع مستقل که سه کلمه برمی‌گرداند + یک registry | `gozar doctor` |
+| `gozar/engines.py` | تنها جایی که sing-box را پیدا می‌کند و نسخه‌اش را می‌پرسد | doctor، discover، engine |
+
+پیاده‌سازی هر سه **تابعی** است: نه کلاس، نه state مشترک. یعنی هر قطعه را
+می‌شود جدا صدا زد و جدا تست کرد:
+
+```bash
+gozar doctor --list-checks     # اسم و عنوان همهٔ بررسی‌ها
+gozar doctor --only engine     # فقط همان یکی
+```
+
+```python
+from gozar.doctor_checks import run
+run("engine", cfg)      # ('ok', 'sing-box (gozar engines dir): … [1.14.5]')
 ```
 
 ### پکیج‌های پایتون (فقط دو تا)
@@ -233,7 +261,7 @@ Pool after check: 17 usable = 3 fast + 10 bak + 4 gen | dead=5 (5 died now, 0 re
 
 ## تست‌ها
 
-سوئیت قراردادها در `tests/test_contracts.py` است (۲۱۹ بررسی، بدون نیاز به
+سوئیت قراردادها در `tests/test_contracts.py` است (۲۶۹ بررسی، بدون نیاز به
 شبکه) و همان تصمیم‌هایی را قفل می‌کند که راحت اشتباهی برمی‌گردند:
 معنی «قابل استفاده»، سه استخر best/bak/gen، حکم تارگتِ SPA، و کران Ctrl+C.
 

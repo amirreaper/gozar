@@ -293,7 +293,9 @@ def t_targets_and_calibration() -> None:
 # ─────────────────────────── 9) env discovery & sources ───────────────────────────
 def t_env_and_sources() -> None:
     print("\n9) virtualenv discovery and source health")
-    launcher = (ROOT / "cli").read_text()
+    # the dev launcher is `gozar-dev`: a script named `cli` collides with the
+    # console_scripts entry point of the same name and pip refuses the install
+    launcher = (ROOT / "gozar-dev").read_text()
     for cand in ("GOZAR_VENV", "VIRTUAL_ENV", "$HOME/.venv", "$HOME/venv", "$ROOT/.venv"):
         check(f"the launcher looks for {cand}", cand in launcher)
     check("a broken venv does not crash", "falling back to system python3" in launcher)
@@ -312,6 +314,163 @@ def t_env_and_sources() -> None:
     check("tiers are named for what they are, and the old names still resolve",
           set(S.TIERS) == {"measured", "tested", "bulk"}
           and S.TIER_ALIASES.get("trusted") == "measured")
+
+
+# ─────────────── 30) modularity: one vocabulary, checkable pieces ───────────────
+def t_modularity() -> None:
+    """Shared pieces must be shared, and each piece must be usable alone.
+
+    The 2026-11-27 report: "the tool could be more modular". The concrete
+    version of that complaint is that the same three words (OK/WARN/FAIL) and
+    the same ~30-line report were copied into whichever command needed them, so
+    a fix in one place never reached the others. These checks pin the seams.
+    """
+    print("\n30) modularity: one vocabulary, one resolver, small functions")
+    from gozar import core_ui as U
+    from gozar import doctor_checks as DC
+
+    # --- core_ui is pure: no state, and it never decides anything for you
+    check("core_ui exposes the three status words",
+          (U.OK, U.WARN, U.FAIL) == ("ok", "warn", "fail"))
+    check("tag() is bracketed the same everywhere",
+          U.tag(U.OK).endswith("[OK]") and U.tag(U.WARN).endswith("[WARN]")
+          and U.tag(U.FAIL).endswith("[FAIL]"))
+    check("line() puts the tag first", U.line(U.OK, "x").startswith("  ["))
+
+    # use add(), not check(): the test must not print into its own output
+    led = U.Ledger()
+    led.add(U.OK)
+    check("a ledger with no failures exits 0", led.summary("a", "b") == U.EXIT_OK)
+    led2 = U.Ledger()
+    led2.add(U.FAIL)
+    check("a ledger with a failure exits 2 (cannot run)",
+          led2.summary("a", "b") == U.EXIT_CANNOT_RUN)
+    check("warnings alone do not fail the run",
+          U.Ledger().add(U.WARN) == U.WARN)
+
+    check("plural() gets 1 node / 3 nodes right",
+          U.plural(1, "node") == "1 node" and U.plural(3, "node") == "3 nodes")
+    check("wrap() folds and keeps the indent",
+          all(ln.startswith("    ") for ln in U.wrap("word " * 60, 4).splitlines()))
+    check("wrap() uses the plain default when redirected (not a terminal)",
+          U.width() == 78)
+    check("truncate() marks what it cut", U.truncate("abcdefghij", 5).endswith("…"))
+    check("table() aligns columns",
+          list(U.table([["a", "1"], ["bbb", "2"]]))[0].startswith("a   "))
+
+    # --- doctor is a list of named checks, not one long function
+    names = DC.names()
+    check("doctor exposes its checks as data",
+          set(names) >= {"python", "packages", "engine", "limits", "data", "root"})
+    check("each check can run on its own",
+          DC.run("python", {})[0] == U.OK)
+    check("an unknown check fails loudly instead of silently",
+          DC.run("nope", {})[0] == U.FAIL)
+    check("a crashing check becomes a FAIL line, not a traceback",
+          DC.run("python", None)[0] in (U.OK, U.FAIL))
+
+    # registry order is the reading order engine must gate the tunnel work
+    check("engine is registered before the live work",
+          names.index("engine") < len(names))
+
+    # --- the engine resolver is still the only one
+    import inspect
+    from gozar import engines as E
+    check("engines.py owns the version probe",
+          "def first_version_line" in inspect.getsource(E))
+    check("doctor does not run its own subprocess for `version`",
+          "subprocess" not in (ROOT / "gozar" / "doctor_checks.py").read_text())
+
+    # --- error classification is a table, so one rule cannot shadow another
+    check("a parse error is classified as a pool problem",
+          "parse/format" in DC.classify_error("decode config: unknown field"))
+    check("a leak is classified as a leak",
+          "did not cross the node" in DC.classify_error("exit ip equals own line"))
+    check("an unknown error is passed through, not swallowed",
+          DC.classify_error("weird thing happened") == "weird thing happened")
+
+    # --- no module hand-rolls the status markers any more
+    import re as _re
+    offenders = []
+    for py in sorted((ROOT / "gozar").glob("*.py")):
+        if py.name in ("display.py", "core_ui.py"):
+            continue
+        text = py.read_text()
+        if _re.search(r"\[OK\]|\[WARN\]|\[FAIL\]", text):
+            offenders.append(py.name)
+    check("only core_ui/display write the status markers", not offenders)
+
+
+# ─────────────── 28) the install flags actually reach the code ───────────────
+def t_engine_install_flags() -> None:
+    """`--reinstall` and `--yes` are dict keys in cfg, not attributes.
+
+    On 2026-11-27 `engine install --reinstall --yes` printed "nothing to do",
+    exited 0 and downloaded nothing: cmd_engine read cfg with getattr(), which
+    returns False for a dict key, so the flag was silently dropped. Then --yes
+    was also wired into `quiet`, so a real download printed no progress and no
+    "works:" proof. Both are pinned here.
+    """
+    print("\n28) engine install flags reach the code that acts on them")
+    from gozar import bot as B
+    src = (ROOT / "gozar" / "bot.py").read_text()
+
+    check("a flag reader handles dict and attribute alike",
+          "def _flag(" in src and "_flag(cfg, \"_engine_force\")" in src)
+    check("no flag is read with getattr(cfg, ...) any more",
+          "getattr(cfg, \"_engine" not in src)
+    check("the parser offers --reinstall and --yes",
+          'dest="engine_force"' in src and 'dest="engine_yes"' in src)
+
+    # dict / attribute / missing-key / None all resolve the same way
+    check("dict key True is honoured", B._flag({"_engine_force": True},
+                                               "_engine_force") is True)
+    check("missing key falls back to the default",
+          B._flag({}, "_engine_force") is False)
+    check("None cfg does not explode", B._flag(None, "_engine_force") is False)
+
+    class _C:
+        _engine_force = True
+    check("an object attribute still works", B._flag(_C(), "_engine_force") is True)
+
+    # --yes answers the question; it must NOT silence the output
+    disp = src[src.index('elif args.cmd == "engine":'):
+               src.index('elif args.cmd == "doctor":')]
+    check("--yes is not wired into quiet", 'getattr(args, "engine_yes", False)\n'
+          '                                     or' not in disp and
+          "quiet=bool(getattr(args, \"quiet\", False))" in disp)
+    check("confirm_install takes assume_yes, not quiet",
+          "def confirm_install(assume_yes" in
+          (ROOT / "gozar" / "engines.py").read_text())
+
+    # non-interactive without --yes must refuse, with 2, instead of hanging
+    from gozar import engines as E
+    import io, sys as _s
+    old_in, old_out = _s.stdin, _s.stdout
+    try:
+        _s.stdin = io.StringIO("")
+        _s.stdout = io.StringIO()
+        refused = E.confirm_install(assume_yes=False)
+        _s.stdout = old_out
+        forced = E.confirm_install(assume_yes=True)
+    finally:
+        _s.stdin, _s.stdout = old_in, old_out
+    check("a pipe without --yes refuses instead of hanging", refused is False)
+    check("--yes downloads without a TTY", forced is True)
+
+
+# ─────────────── 29) doctor without an engine ───────────────
+def t_doctor_without_engine() -> None:
+    """A missing engine is an answer, not a traceback (reported 2026-11-27)."""
+    print("\n29) doctor survives a missing engine and says one useful thing")
+    src = (ROOT / "gozar" / "doctor.py").read_text()
+    check("doctor tracks whether the engine exists", "engine_ok" in src)
+    check("doctor skips the end-to-end test without an engine",
+          "Skipping the end-to-end test" in src)
+    check("the summary names the one command that fixes it",
+          "gozar engine install" in src)
+    check("doctor no longer tells users to run ./bot",
+          "./bot " not in src and "bot discover" not in src)
 
 
 # ─────────────────────────── 10) performance switches ───────────────────────────
@@ -401,11 +560,15 @@ def t_selector_and_diagnostics():
 
     # doctor must explain the funnel instead of leaving "0 alive" unexplained
     doc = (ROOT / "gozar" / "doctor.py").read_text()
+    dchecks = (ROOT / "gozar" / "doctor_checks.py").read_text()
     check("doctor reports the rejection reasons of the last run",
-          "_print_last_run_report" in doc and "rejected, by reason" in doc)
+          "last_run_report(cfg)" in doc and "rejected, by reason" in dchecks)
     check("doctor distinguishes a line problem from a pool problem",
-          "like the line" in doc and "like a washout" in doc)
-    check("doctor prints the pool funnel", "pools:" in doc and "reachable" in doc)
+          "like the line" in dchecks and "like a washout" in dchecks)
+    check("doctor prints the pool funnel",
+          "pools:" in dchecks and "reachable" in dchecks)
+    check("the last-run report is reachable on its own (no 200-line function)",
+          "def last_run_report" in dchecks)
 
     from gozar import core_output as _co
     sb = (ROOT / "gozar" / "core_output.py").read_text()
@@ -1056,7 +1219,10 @@ def t_install_paths() -> None:
           and "def cmd_engine" in (ROOT / "gozar" / "bot.py").read_text())
     check("every hint a user sees is written once, in one place",
           "INSTALL_HINTS" in (ROOT / "gozar" / "engines.py").read_text()
-          and "INSTALL_HINTS" in (ROOT / "gozar" / "doctor.py").read_text())
+          and "INSTALL_HINTS" in
+          (ROOT / "gozar" / "doctor_checks.py").read_text()
+          and "engines import INSTALL_HINTS" in
+          (ROOT / "gozar" / "doctor_checks.py").read_text())
 
     # the regression that matters: discover must not run without an engine
     src = (ROOT / "gozar" / "bot.py").read_text()
@@ -1109,6 +1275,9 @@ def main() -> int:
     t_target_detection()
     t_sigint_is_bounded()
     t_install_paths()
+    t_engine_install_flags()
+    t_modularity()
+    t_doctor_without_engine()
     print("\n" + "=" * 70)
     print(f"  PASS: {len(PASSES)}   FAIL: {len(FAILS)}")
     for f in FAILS:

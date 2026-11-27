@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gozar"
-version = "2.1.0"
+version = "2.1.1"
 description = "Find, test and keep a working pool of free public proxy configs, then connect through the best of them."
 readme = "README.md"
 requires-python = ">=3.10"

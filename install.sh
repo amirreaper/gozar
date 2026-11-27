@@ -41,7 +41,7 @@ elif [ "$WANT_VENV" = 1 ]; then
   say "creating .venv and installing the two dependencies"
   "$PY" -m venv .venv
   ./.venv/bin/pip install -q -r requirements.txt
-  say "dependencies: installed in .venv (the ./cli launcher picks it up)"
+  say "dependencies: installed in .venv (the ./gozar-dev launcher picks it up)"
 elif [ "$WANT_SYSTEM" = 1 ]; then
   say "installing gozar with pip --user"
   "$PY" -m pip install --user -q -e . 2>/dev/null || "$PY" -m pip install --user -q aiohttp aiohttp-socks
@@ -66,4 +66,4 @@ if ! "$PY" -m gozar engine status >/dev/null 2>&1; then
   }
 fi
 
-say "done — try:  ./cli --version   and   ./cli doctor"
+say "done — try:  ./gozar-dev --version   and   ./gozar-dev doctor"

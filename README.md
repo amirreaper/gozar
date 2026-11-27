@@ -15,46 +15,86 @@ latency thresholds derived from *your* baseline ping.
 ## Layout
 
 ```
-proxyfinder/
-├── bot                     # bash launcher (ulimit, venv, exec)
+gozar/
+├── gozar-dev               # bash launcher (ulimit, venv, exec) — `./gozar-dev <command>`
+│                           # named gozar-dev because a script called `cli` collides
+│                           # with pip's own entry point of the same name
 ├── install.sh              # installs sing-box + venv (arch-detect)
-├── config.json             # user overrides (defaults live in proxyfinder/config.py)
+├── config.json             # user overrides (defaults live in gozar/config.py)
 ├── requirements.txt        # aiohttp + aiohttp-socks (vendored under vendor/)
 ├── completions/bot.fish    # fish completions
-├── docs/archive/DEFECTS.md         # defect report & fix status
-└── proxyfinder/            # the python package
-    ├── bot.py              # CLI: discover/check/loop/run/connect/list/status/verify/doctor/pick/drop
+└── gozar/                  # the python package
+    ├── bot.py              # CLI: argument parsing, command dispatch, cmd_* functions
+    │
+    ├── core_ui.py          # ⊙ shared vocabulary: OK/WARN/FAIL, say(), Ledger, wrap, table
+    ├── doctor_checks.py    # ⊙ every doctor check as its own function + a registry
+    ├── engines.py          # ⊙ the ONE resolver for the sing-box binary + version probe
+    │
     ├── config.py           # DEFAULTS + load_config
-    ├── core_sources.py     # TRUSTED/GOOD/MEDIUM tiers + mirrors_for
+    ├── core_sources.py     # measured/tested/bulk tiers + protocol sources
     ├── core_parser.py      # link → config dict (vless/vmess/trojan/ss/hy2/tuic/anytls)
     ├── core_runner.py      # sing-box instance(s) + real fetch + exit-IP tunnel proof
     ├── core_test.py        # cascade discover + check, adaptive thresholds
-    ├── core_store.py       # state.json: upsert/score/prune + best/bak/gen selectors + freshness
+    ├── core_store.py       # state.json: upsert/score/prune + selectors + freshness
     ├── core_output.py      # best/bak/gen .txt+.json+.summary.txt + sing-box group build
     ├── core_connect.py     # urltest group connect (nodes engine)
     ├── core_live.py        # live status board for a running tunnel
     ├── core_score.py       # source scoring against one target
     ├── thresholds.py       # adaptive fast/keep ceilings from your baseline
     ├── ui_pick.py          # interactive picker — curses TUI / stdin menu fallback
-    ├── doctor.py           # self-diagnostics incl. direct target probe
-    ├── engines.py          # where the sing-box binary is searched
-    └── checker.py          # tcp_ping, udp_quic_ping, baseline, classify, exit-IP proof utils
+    ├── doctor.py           # ⊙ the running ORDER: static checks → live checks → verdict
+    ├── checker.py          # tcp_ping, udp_quic_ping, baseline, classify, exit-IP proof
+    └── display.py          # ⊙ colour/bar/card paint layer (cosmetics only)
 ```
 
-## Five ways to install — pick one
+`⊙` marks the shared pieces. The rule is one sentence: **wording lives in
+`core_ui`, decisions live in the module that owns the fact, and `bot.py` only
+routes.** A command never invents its own `[WARN]` or its own exit code any more.
+
+### The three seams, with the code
+
+```python
+# 1. one vocabulary — every command speaks it
+from .core_ui import OK, WARN, FAIL, say, Ledger
+ledger = Ledger()
+ledger.check(OK, "python 3.13")
+ledger.check(FAIL, "sing-box not found")
+return ledger.summary("All checks passed.", "issue(s) found.")   # 0 or 2
+
+# 2. doctor is a list of functions, not a 250-line one
+from .doctor_checks import registry, run
+run("engine", cfg)        # -> ("ok", "sing-box (gozar engines dir): … [1.14.5]")
+names()                   # -> ['python', 'packages', 'engine', 'limits', 'data', 'root']
+
+# 3. one engine resolver, one version probe
+from .engines import find_binary, source_of, first_version_line
+first_version_line(find_binary("sing-box"))   # -> 'sing-box version 1.14.5'
+```
+
+Both are reachable from the command line, which is how you can tell they are
+real seams and not just nicer file names:
+
+```bash
+gozar doctor --list-checks      # name + title of every check
+gozar doctor --only engine      # run exactly one (exit 2 when it fails)
+```
+
+## Install — three ways while the package is not on PyPI yet
 
 | # | for whom | command |
 |---|---|---|
 | 1 | **just try it, one file** | `curl -LO https://github.com/amirreaper/gozar/releases/latest/download/gozar.pyz` → `chmod +x gozar.pyz` → `./gozar.pyz engine install` |
-| 2 | **user install, no clone** | `pip install gozar` |
-| 3 | **pip + the engine in one go** | `pip install "gozar[engine]"` |
-| 4 | **from git, keep it editable** | `pip install git+https://github.com/amirreaper/gozar.git` |
-| 5 | **developer checkout** | `git clone` → `bash install.sh --venv` → `./cli` |
+| 2 | **from git, user-wide** | `pip install --user "gozar[engine] @ git+https://github.com/amirreaper/gozar.git"` |
+| 3 | **developer checkout** | `git clone https://github.com/amirreaper/gozar.git && cd gozar && bash install.sh --venv` → `./gozar-dev` |
+
+> `pip install gozar` will work once the package is on PyPI. Until then it is
+> **not** published, and every doc here says so on purpose — a README that
+> tells you to run a command that fails is worse than a longer one.
 
 Whichever you pick, the first command is the same check:
 
 ```bash
-gozar engine status        # or ./cli engine status in a checkout
+gozar engine status        # or ./gozar-dev engine status in a checkout
 ```
 
 `gozar` (pronounced *gozar*, "the passage") tests nodes with **sing-box**, a Go
@@ -75,7 +115,7 @@ passed · `130` stopped with Ctrl+C.
 ```bash
 bash install.sh              # engine only: downloads sing-box into ./engines
 bash install.sh --venv       # + a local .venv with aiohttp/aiohttp-socks
-./cli doctor                 # proves engine + deps + a live test
+./gozar-dev doctor                 # proves engine + deps + a live test
 ```
 
 NixOS / anything with nix:

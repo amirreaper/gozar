@@ -1,6 +1,6 @@
 """gozar — Collect, check and maintain public proxy lists."""
 APP_NAME = "gozar"            # "gozar" = the passage through
-__version__ = "2.1.0"
+__version__ = "2.1.1"
 
 # Vendored third-party packages (vendor/ at repo root) take precedence over
 # system site-packages. This keeps the bot working where `pip install --user`

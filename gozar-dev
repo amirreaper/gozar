@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Convenience launcher for gozar (development checkout).
-# Usage:  ./cli discover -t https://example.com -n 20
-#         ./cli run 10
-#         ./cli connect
+# Usage:  ./gozar-dev discover -t https://example.com -n 20
+#         ./gozar-dev run 10
+#         ./gozar-dev connect
 #
 # Works even if this script is symlinked/copied to another folder:
 #  1) symlinks are resolved to the real file,
@@ -50,7 +50,7 @@ Put this script inside (or symlink it into) the gozar repo, or point
 it at the repo explicitly:
 
   export GOZAR_HOME=/path/to/gozar
-  ./cli $*
+  ./gozar-dev $*
 
 EOF
   exit 1
