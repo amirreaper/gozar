@@ -463,6 +463,11 @@ def t_broken_install_message() -> None:
           "def _pip_fact" in src and "pip" in src and "show" in src)
     check("it distinguishes 'pip never installed here' from 'files are damaged'",
           "not the one pip used" in src and "directory itself is damaged" in src)
+    # --user is refused inside a venv, so it must not be the only advice there
+    check("it knows --user is refused inside a venv", "_install_cmd" in src
+          and "no --user" in src)
+    check("it looks in the usual venv places even when none is activated",
+          '".venv"' in src and '".gozar"' in src)
 
 
 # ─────────────── 33) completions are generated, and current ───────────────

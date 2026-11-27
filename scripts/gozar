@@ -30,12 +30,12 @@ Four things cause this, and they need different fixes:
 
   1. user site-packages is disabled for that python
      (PYTHONNOUSERSITE=1, or the script runs `python -s`)
-     -> unset it, or install with:  {exe} -m pip install --user --force-reinstall {url}
+     -> unset it, or install with:  {install_cmd}
 
   2. pip installed into a DIFFERENT python than this launcher uses
      (two pythons: /usr/bin/python3 and /usr/local/bin/python3)
-     -> use the same one for both:  {exe} -m pip install --user --force-reinstall {url}
-        {exe} -m gozar --version
+     -> use the same one for both:  {install_cmd}
+        {exe} -m gozar --version   {install_note}
 
   3. this is a venv and the package went to the user site instead
      -> {exe} -m pip install {url}
@@ -77,6 +77,19 @@ HEAD_MISSING = "gozar: installed, but this launcher cannot import its own packag
 HEAD_BROKEN = ("gozar: the package is installed but incomplete — a module inside "
                "it is missing.\n   Reinstall it with the interpreter this "
                "launcher uses (below).")
+
+
+def _install_cmd():
+    """`pip install` spelled so it actually works where we are standing."""
+    import site
+    in_venv = sys.prefix != sys.base_prefix
+    if in_venv:
+        # pip refuses --user inside a venv; say the command that works
+        return (f"{sys.executable} -m pip install --force-reinstall "
+                "git+https://github.com/amirreaper/gozar.git",
+                "this is a venv — no --user")
+    return (f"{sys.executable} -m pip install --force-reinstall --user "
+            "git+https://github.com/amirreaper/gozar.git", "")
 
 
 def _pip_fact():
@@ -134,13 +147,26 @@ def _find_working(script):
         if os.path.abspath(cand) == me or not os.access(cand, os.X_OK):
             continue
         rows.append([cand])
-    # b) the virtualenv this launcher was started from, if any
-    venv = os.environ.get("VIRTUAL_ENV") or ""
+    # b) the virtualenv this launcher was started from, if any — VIRTUAL_ENV may
+    # be unset even when we ARE inside one (a non-activated venv), so sys.prefix
+    # is the reliable signal.
+    venv = os.environ.get("VIRTUAL_ENV") or (
+        sys.prefix if sys.prefix != sys.base_prefix else "")
     if venv:
         cand = os.path.join(venv, "bin", "gozar")
         if os.access(cand, os.X_OK) and os.path.abspath(cand) != me:
             rows.append([cand])
-    # c) the interpreter itself, which is the most reliable spelling of all
+    # c) the usual venv locations, even when none of them is activated. The
+    #    report this answers had a good copy in ~/.venv and no VIRTUAL_ENV,
+    #    because the shell had been left: same list gozar-dev searches.
+    home = os.environ.get("HOME") or os.path.expanduser("~")
+    for cand in (os.path.join(home, ".venv", "bin", "gozar"),
+                 os.path.join(home, ".gozar", "bin", "gozar"),
+                 os.path.join(os.getcwd(), ".venv", "bin", "gozar"),
+                 os.path.join(os.getcwd(), "venv", "bin", "gozar")):
+        if os.access(cand, os.X_OK) and os.path.abspath(cand) != me:
+            rows.append([cand])
+    # d) the interpreter itself, which is the most reliable spelling of all
     rows.append([sys.executable, "-m", "gozar"])
     out = []
     for row in rows:
@@ -173,6 +199,11 @@ def _explain(exc):
         working = _find_working(__file__)
     except Exception:                          # noqa: BLE001
         working = []
+    try:
+        install_cmd, install_note = _install_cmd()
+    except Exception:                          # noqa: BLE001
+        install_cmd, install_note = ("python3 -m pip install --force-reinstall "
+                                     "git+https://github.com/amirreaper/gozar.git", "")
     found_block = WORKING.format(rows="\n".join(working),
                                  broken=os.path.abspath(__file__)) if working else ""
     try:
@@ -185,7 +216,9 @@ def _explain(exc):
                                    exe=sys.executable, usersite=usersite,
                                    enabled=enabled, found=found,
                                    error="%s: %s" % (type(exc).__name__, exc),
-                                   url=URL))
+                                   url=URL,
+                                   install_cmd=install_cmd,
+                                   install_note=install_note))
     return 2
 
 

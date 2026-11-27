@@ -257,8 +257,15 @@ def _what_works(here: Path) -> None:
     for line in ok:
         print("      " + line)
     print("  " + U.bold("To make plain `gozar` be one of them:"))
-    print("      " + sys.executable + " -m pip install --force-reinstall --user "
-          "git+https://github.com/amirreaper/gozar.git")
+    # `--user` is refused INSIDE a venv ("User site-packages are not visible in
+    # this virtualenv"), so recommending it there is a dead end. Ask the
+    # interpreter where it lives instead of guessing.
+    in_venv = sys.prefix != sys.base_prefix
+    flag = "" if in_venv else " --user"
+    print("      " + sys.executable + " -m pip install --force-reinstall"
+          + flag + " git+https://github.com/amirreaper/gozar.git")
+    if in_venv:
+        print("      # this is a venv: no --user, and use its own bin/gozar")
     print()
 
 
