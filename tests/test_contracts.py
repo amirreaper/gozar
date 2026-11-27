@@ -316,6 +316,31 @@ def t_env_and_sources() -> None:
           and S.TIER_ALIASES.get("trusted") == "measured")
 
 
+# ─────────────── 31) the release workflow must not fail without a token ───────
+def t_release_workflow() -> None:
+    """v2.1.1 shipped a RED release because the pypi job always ran.
+
+    The upload step guarded on `env.TWINE_USERNAME != ''`, but that env block
+    belonged to the step itself — a step's `env:` is not visible to its own
+    `if:`, so the condition was always false-positive and twine ran with an
+    empty password. The secret is now read at JOB level.
+    """
+    print("\n31) the release workflow stays green without a PyPI token")
+    wf = (ROOT / ".github" / "workflows" / "release.yml").read_text()
+    check("the pypi job declares the secret at job level",
+          "PYPI_TOKEN: ${{ secrets.PYPI_API_TOKEN }}" in wf)
+    check("the upload is skipped, not failed, without a token",
+          "if: env.PYPI_TOKEN != ''" in wf)
+    check("a skipped upload says so instead of failing silently",
+          "skipped the PyPI upload" in wf)
+    check("the single-file build is still attached to the release",
+          "dist/gozar.pyz" in wf and "action-gh-release" in wf)
+    check("the contract suite runs before anything is published",
+          "tests/test_contracts.py" in wf)
+    check("the tag must agree with pyproject",
+          "tag $tag != pyproject version" in wf)
+
+
 # ─────────────── 30) modularity: one vocabulary, checkable pieces ───────────────
 def t_modularity() -> None:
     """Shared pieces must be shared, and each piece must be usable alone.
@@ -1278,6 +1303,7 @@ def main() -> int:
     t_engine_install_flags()
     t_modularity()
     t_doctor_without_engine()
+    t_release_workflow()
     print("\n" + "=" * 70)
     print(f"  PASS: {len(PASSES)}   FAIL: {len(FAILS)}")
     for f in FAILS:

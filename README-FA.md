@@ -261,7 +261,7 @@ Pool after check: 17 usable = 3 fast + 10 bak + 4 gen | dead=5 (5 died now, 0 re
 
 ## تست‌ها
 
-سوئیت قراردادها در `tests/test_contracts.py` است (۲۶۹ بررسی، بدون نیاز به
+سوئیت قراردادها در `tests/test_contracts.py` است (۲۷۵ بررسی، بدون نیاز به
 شبکه) و همان تصمیم‌هایی را قفل می‌کند که راحت اشتباهی برمی‌گردند:
 معنی «قابل استفاده»، سه استخر best/bak/gen، حکم تارگتِ SPA، و کران Ctrl+C.
 

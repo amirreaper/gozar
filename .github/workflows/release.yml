@@ -47,6 +47,11 @@ jobs:
   pypi:
     needs: check-version
     runs-on: ubuntu-latest
+    # The secret is read at JOB level on purpose: a step's own `env:` is not
+    # visible to that step's `if:`, so checking TWINE_USERNAME there always
+    # evaluated to "" and every release ended with a red pypi job (v2.1.1).
+    env:
+      PYPI_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -55,11 +60,17 @@ jobs:
       - run: python -m build
       - run: python -m twine check dist/*
       # Set PYPI_API_TOKEN in Settings -> Secrets -> Actions.
-      # Without the secret this step is skipped, so forks do not fail.
+      # Without it this step is SKIPPED (not failed), so a fork or a
+      # not-yet-published project still gets a green release.
       - name: upload to PyPI
-        if: ${{ env.TWINE_USERNAME != '' }}
+        if: env.PYPI_TOKEN != ''
         env:
           TWINE_USERNAME: __token__
-          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+          TWINE_PASSWORD: ${{ env.PYPI_TOKEN }}
           TWINE_REPOSITORY: pypi
-        run: python -m twine upload dist/*
+        run: python -m twine upload --skip-existing dist/*
+      - name: say what was skipped
+        if: env.PYPI_TOKEN == ''
+        run: |
+          echo "::notice::No PYPI_API_TOKEN secret set — skipped the PyPI upload."
+          echo "The release still has gozar.pyz attached." 
