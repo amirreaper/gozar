@@ -84,6 +84,40 @@ def write_target_list(out_dir: Path, ok_recs) -> int:
     return len(lines)
 
 
+def refresh_pool(out_dir: Path, state: dict, cfg: dict | None = None) -> int:
+    """Rewrite best/bak/gen/ok from state. Use after a deletion.
+
+    `drop` edited state.json and nothing else, so `list` printed the node that
+    had just been deleted and `connect` would happily use it — the pool files
+    were stale until the next discover (reported 2026-11-30). Every command
+    that mutates the pool calls this, so there is ONE definition of what the
+    pool files mean.
+    """
+    cfg = cfg or {}
+    n_best = int(cfg.get("best_n") or 50)
+    n_bak = int(cfg.get("bak_n") or 100)
+    n_gen = int(cfg.get("gen_n") or 100)
+    require_target = bool(cfg.get("targets")) and \
+        (cfg.get("list_mode", "target") == "target")
+    meta = {}
+    meta_p = out_dir / "meta.json"
+    if meta_p.exists():
+        try:
+            import json as _json
+            meta = _json.loads(meta_p.read_text(encoding="utf-8"))
+        except Exception:                                # noqa: BLE001
+            meta = {}
+    res = write_files(out_dir, state, n_best, n_bak, require_target, meta,
+                      n_gen=n_gen)
+    # ok.txt is the strict subset: nodes that passed every target
+    try:
+        ok = [r for r in state.values() if store.target_now(r)]
+        write_target_list(out_dir, ok)
+    except Exception:                                    # noqa: BLE001
+        pass
+    return res
+
+
 def write_records(out_dir: Path, best_recs, bak_recs, state: dict, meta: dict,
                   gen_recs=None):
     """Write files from pre-selected records (no re-selection)."""

@@ -1431,6 +1431,97 @@ Examples:
 """
 
 
+# One line per command: the examples a `-h` should end with. Kept here, next to
+# the parser, because a help text without an example is a list of flags — and
+# "how do I actually use this" is the question `-h` exists to answer.
+_EXAMPLES = {
+    "discover": [
+        "gozar discover -t https://example.com/ -n 20",
+        "gozar discover -n 30 --cdn            # Cloudflare-fronted only",
+        "gozar discover --reset                # archive the old pool first",
+    ],
+    "check": [
+        "gozar check                           # re-test what is stored",
+        "gozar check -t https://example.com/ --drop-dead",
+    ],
+    "loop": ["gozar loop --check-interval 900  # keep the pool fresh forever"],
+    "connect": [
+        "gozar connect                         # mixed proxy on 127.0.0.1:2080",
+        "gozar connect --port 3000 --from all",
+        "gozar connect --pin 3                 # one node, by list index",
+    ],
+    "run": [
+        "gozar run 5                           # find 5, verify, pick, connect",
+        "gozar run 3 --force                   # ignore the stored pool",
+    ],
+    "pick": [
+        "gozar pick                            # interactive table, Enter = connect",
+        "gozar pick --from gen                 # start on the general pool",
+    ],
+    "list": [
+        "gozar list",
+        "gozar list --pin 2 --drop 5",
+        "gozar list --recheck                  # re-test the shown rows now",
+    ],
+    "drop": [
+        "gozar drop 3                          # by list index (see `gozar list`)",
+        "gozar drop a8dc9680                   # by short id",
+    ],
+    "status": ["gozar status"],
+    "verify": [
+        "gozar verify                          # prove the best 10 really tunnel",
+        "gozar verify -n 20 --from all",
+        "gozar verify --port 2080              # test an already running proxy",
+    ],
+    "calibrate": [
+        "gozar calibrate                       # measure the line, propose ceilings",
+        "gozar calibrate --write                # save the proposal",
+    ],
+    "sources": [
+        "gozar sources -t https://example.com/",
+        "gozar sources --top 10 --propose",
+    ],
+    "config": [
+        "gozar config --show",
+        "gozar config --get fast_max_ms",
+        "gozar config --set fast_max_ms=1500",
+        "gozar config --unset fast_max_ms      # back to the shipped default",
+    ],
+    "selfcheck": [
+        "gozar selfcheck                       # is this install intact?",
+        "gozar selfcheck --fix                 # print the repair commands",
+    ],
+    "doctor": [
+        "gozar doctor                          # every check, then a live test",
+        "gozar doctor --list-checks",
+        "gozar doctor --only engine",
+    ],
+    "engine": [
+        "gozar engine status",
+        "gozar engine install                  # download sing-box (~32MB)",
+        "gozar engine install --reinstall --yes",
+    ],
+}
+
+
+# argparse re-wraps a description into one paragraph, which turns an Examples
+# block into unreadable soup. Every subparser is built through this, so a help
+# text is formatted the way it was written.
+_FMT = argparse.RawDescriptionHelpFormatter
+
+
+def _with_examples(sub, name: str):
+    """Append an Examples section to a subcommand's help, once."""
+    ex = _EXAMPLES.get(name)
+    if not ex:
+        return sub
+    block = "\n\nexamples:\n" + "\n".join("  " + e for e in ex)
+    base = sub.description or (sub.epilog or "")
+    if "examples:" not in base:
+        sub.description = (base.rstrip() + block).strip()
+    return sub
+
+
 def build_parser():
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("-c", "--config", default=argparse.SUPPRESS,
@@ -1573,6 +1664,7 @@ def build_parser():
                         "config value still overrides it.")
     sub = p.add_subparsers(dest="cmd", metavar="<command>", required=False)
 
+
     sub.add_parser("discover", parents=[common, search],
                    help="Broadly gather and test until best is full",
                    description="Fetches configs from public sources, runs TCP probes, "
@@ -1611,7 +1703,7 @@ def build_parser():
                     help="allow falling back to the gen pool (alive nodes that did "
                          "NOT pass the targets) when no target-ok node exists")
     cn.add_argument("--pin", type=int, default=None, metavar="IDX",
-                    help="Connect with a single pinned node by index (see bot list) "
+                    help="Connect with a single pinned node by index (see `gozar list`) "
                          "instead of the urltest auto group")
     rn = sub.add_parser("run", parents=[common, search],
                         help="Find N good nodes, verify, then connect",
@@ -1761,7 +1853,7 @@ def build_parser():
 
     doc = sub.add_parser("doctor", parents=[common],
                          help="Run diagnostics (binary, packages, sources, ping, sample test)",
-                         description="Checks that the bot and its dependencies are "
+                         description="Checks that gozar and its dependencies are "
                                      "installed correctly and performs a small live "
                                      "connectivity test. Every check has a name; "
                                      "`--only` runs just one of them.")
@@ -1784,6 +1876,12 @@ def build_parser():
                      help="do not ask before downloading")
     eng.add_argument("--reinstall", dest="engine_force", action="store_true",
                      help="replace an engine that is already present")
+
+    for _name, _sp in sub.choices.items():
+        # raw formatting per subcommand, otherwise argparse re-wraps the whole
+        # description into one paragraph and the examples become unreadable
+        _sp.formatter_class = argparse.RawDescriptionHelpFormatter
+        _with_examples(_sp, _name)
     return p
 
 

@@ -1,5 +1,71 @@
 # تغییرات — gozar (سابقاً rahyab)
 
+## v2.1.5 — ۲۰۲۶-۱۲-۰۱ · drop، help، و ممیزی کامل نودها
+
+ممیزی در یک محیط **کاملاً تازه** (venv خالی، `HOME` تازه، بدون هیچ چیز از قبل)
+انجام شد و کل مسیر نودها اجرا شد: discover → list → verify → check → connect →
+pick → drop. دو باگ واقعی پیدا شد و دو کمبود.
+
+**۱) `gozar drop` واقعاً حذف نمی‌کرد.** بازتولید شد:
+
+```
+$ gozar drop a8dc9680
+[INFO] deleted: shadowsocks 66.163.117.245:443
+$ gozar list | grep -c ★
+9          ← همان تعداد قبل، و همان نود
+```
+
+`drop` فقط `state.json` را می‌نوشت؛ ولی `list` و `connect` از
+`best.json`/`bak.json`/`gen.json` می‌خوانند. یعنی نودِ حذف‌شده هم در لیست بود و
+هم قابل اتصال. حالا یک تابع مشترک در `core_output`
+(`refresh_pool`) فایل‌های استخر را از روی state بازنویسی می‌کند و **هم** `drop`
+و **هم** `pick` از آن استفاده می‌کنند.
+
+**۲) `drop 0` می‌توانست چند نود را با هم حذف کند.** هر شناسه را به‌صورت
+**پیشوند** تطبیق می‌داد، پس `drop 0` هر نودی که idش با `0` شروع می‌شد را پاک
+می‌کرد. حالا:
+
+| ورودی | رفتار |
+|---|---|
+| `drop 3` | ایندکس لیست (اول) — دقیقاً یک نود |
+| `drop a8dc9680` | تطبیق دقیق، سپس پیشوند |
+| `drop 4f` | اگر چند نود باشد → خطا و درخواست id بلندتر، **بدون حذف** |
+
+**۳) هر `-h` مثال دارد.** قبلاً فقط فهرست پرچم‌ها بود. حالا هر ۱۶ دستور با بخش
+`examples:` تمام می‌شود که از یک جدول واحد تولید می‌شود:
+
+```
+$ gozar discover -h
+...
+examples:
+  gozar discover -t https://example.com/ -n 20
+  gozar discover -n 30 --cdn            # Cloudflare-fronted only
+  gozar discover --reset                # archive the old pool first
+```
+
+`RawDescriptionHelpFormatter` هم برای هر زیرفرمان ست شد تا argparse مثال‌ها را
+در یک پاراگراف به‌هم نریزد.
+
+**۴) متن‌ها دیگر «bot» نمی‌گویند** (در `doctor -h` و راهنمای `--pin`).
+
+**ممیزی که انجام شد (همه در محیط تازه):**
+
+| مسیر | نتیجه |
+|---|---|
+| `pip install git+…` در venv خالی | ✅ 2.1.5 |
+| `gozar engine install` | ✅ sing-box 1.14.6 دانلود و اجرا شد |
+| `gozar discover -n 8` | ✅ ۶۵۲۰ کاندید، ۹ زنده، ۹ تارگت‌اوکی |
+| `gozar list` | ✅ ۸ بهترین با کشور خروجی |
+| `gozar verify -n 5` | ✅ tunneled=5 leaked=0 |
+| `gozar check` | ✅ alive=9 target_ok=8 |
+| `gozar connect` + curl واقعی | ✅ HTTP 204 در ۰٫۲۴s |
+| `gozar pick` بدون TTY | ✅ بدون hang |
+| `gozar drop` | ✅ حالا واقعاً حذف می‌کند |
+| `gozar status / config / calibrate / selfcheck / doctor` | ✅ |
+
+**تست‌ها: ۳۷۱ قرارداد، ۰ خطا** (گروه‌های ۳۶ و ۳۷ اضافه شدند).
+
+
 ## v2.1.4 — ۲۰۲۶-۱۱-۳۰ · `gozar-dev` و لانچر
 
 **۱) باگ من بود: `./gozar-dev` داخل ریپو می‌گفت «gozar package not found».**

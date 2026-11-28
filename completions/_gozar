@@ -172,7 +172,7 @@ _gozar() {
             '--help[show this help message and exit]' \
             '--mode[Connection mode (default from config: proxy)]' \
             '--no-pretest[skip the connect pre-test (connect may then pick a dead node)]' \
-            '--pin[Connect with a single pinned node by index (see bot list) instead of the urltest auto group]' \
+            '--pin[Connect with a single pinned node by index (see `gozar list`) instead of the urltest auto group]' \
             '--port[Local mixed proxy port]' \
             '--quiet[Warnings and results only (less log noise)]' \
             '--verbose[Verbose logging]' \

@@ -161,7 +161,7 @@ complete -c gozar -n "__fish_seen_subcommand_from connect" -l mode -r -a "proxy 
 complete -c gozar -n "__fish_seen_subcommand_from connect" -l port -r -d "Local mixed proxy port"
 complete -c gozar -n "__fish_seen_subcommand_from connect" -l from -r -a "best bak gen all" -d "Which list to use (best/bak/gen/all, default: best)"
 complete -c gozar -n "__fish_seen_subcommand_from connect" -l allow-no-target -d "allow falling back to the gen pool (alive nodes that did NOT pass the targets) when no target-ok node exists"
-complete -c gozar -n "__fish_seen_subcommand_from connect" -l pin -r -d "Connect with a single pinned node by index (see bot list) instead of the urltest auto group"
+complete -c gozar -n "__fish_seen_subcommand_from connect" -l pin -r -d "Connect with a single pinned node by index (see `gozar list`) instead of the urltest auto group"
 
 # run
 complete -c gozar -n "__fish_seen_subcommand_from run" -s c -l config -r -F -d "Config file path (default: config.json)"

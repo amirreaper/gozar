@@ -27,25 +27,17 @@ UDP_PROTOCOLS = {"hysteria2", "tuic", "wireguard"}
 
 
 def _persist_all(cfg: dict | None, state: dict, state_path: Path) -> None:
-    """Save state.json AND rewrite best/bak/gen output files so any changes
-    made in interactive pick mode (or before Ctrl+C exit) are always saved."""
+    """Save state.json and rewrite best/bak/gen so a deletion sticks.
+
+    This used to be its own copy of the selection logic while `drop` had none
+    at all, which is how a deleted node kept appearing in `list` and stayed
+    connectable (2026-11-30). There is now one implementation in core_output
+    and both entry points call it.
+    """
     from . import core_output as output, core_store as store
     try:
         store.save(state_path, state)
-        out_dir = state_path.parent
-        best_n = cfg.get("best_n", 50) if cfg else 50
-        bak_n = cfg.get("bak_n", cfg.get("backup_n", 50)) if cfg else 50
-        gen_n = cfg.get("gen_n", 100) if cfg else 100
-        req_t = bool(cfg.get("targets")) if cfg else True
-        output.write_files(
-            out_dir, state,
-            best_n, bak_n,
-            require_target=req_t,
-            meta={"ts": int(__import__("time").time()),
-                  "mode": "pick",
-                  "total_state": len(state)},
-            n_gen=gen_n,
-        )
+        output.refresh_pool(state_path.parent, state, cfg or {})
     except Exception as e:  # noqa: BLE001
         log.debug("pick persist error: %s", e)
 
@@ -636,19 +628,42 @@ def cmd_drop(cfg, short_id: str) -> int:
     if not state:
         log.error("state is empty")
         return 2
-    hits = [k for k in state if k.startswith(short_id)]
-    if not hits:
-        # maybe it was an index into the pick order
+    # An all-digit argument is ambiguous: it can be a list index (0, 1, 2 …) or
+    # an id that happens to start with a digit. `drop 0` used to prefix-match
+    # every id starting with '0' and delete them ALL (2026-11-30), so an index
+    # is resolved FIRST, and a prefix match only runs when it hits exactly one.
+    sid = str(short_id).strip()
+    hits: list[str] = []
+    if sid.isdigit():
         nodes = load_nodes(state, require_target=False)
         try:
-            ident = nodes[int(short_id)][0]
-            hits = [ident]
+            hits = [nodes[int(sid)][0]]
         except (ValueError, IndexError):
-            log.error("No node matches '%s'", short_id)
+            hits = []
+    if not hits:
+        exact = [k for k in state if k == sid]
+        pref = [k for k in state if k.startswith(sid)]
+        if len(pref) == 1:
+            hits = pref
+        elif len(pref) > 1 and not exact:
+            log.error("'%s' matches %d nodes (%s …) — use a longer id",
+                      sid, len(pref), ", ".join(k[:8] for k in pref[:4]))
             return 2
+        else:
+            hits = exact
+    if not hits:
+        log.error("No node matches '%s' (see `gozar list` for ids)", short_id)
+        return 2
     for k in hits:
-        r = state.pop(k)
+        r = state.pop(k, None) or {}
         log.info("deleted: %s %s:%s", r.get("type"), r.get("server"),
                  r.get("server_port"))
     store.save(sp, state)
+    # the pool files are what `list` and `connect` read; leaving them alone is
+    # how a deleted node kept showing up (2026-11-30)
+    try:
+        from . import core_output as out
+        out.refresh_pool(data, state, cfg)
+    except Exception as e:                               # noqa: BLE001
+        log.warning("deleted from state, but the pool files did not refresh: %s", e)
     return 0

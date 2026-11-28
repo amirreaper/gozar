@@ -443,6 +443,96 @@ def t_dev_launcher() -> None:
           "no gozar checkout found" in text)
 
 
+# ─────────────── 36) a deletion must actually delete ───────────────
+def t_drop_really_deletes() -> None:
+    """`gozar drop 3` said "deleted", and `gozar list` still showed the node.
+
+    Reproduced 2026-11-30 in a clean venv: drop edited state.json only, while
+    `list` and `connect` read best.json/bak.json/gen.json. Worse, an all-digit
+    argument was treated as an id PREFIX first, so `drop 0` could match every
+    id starting with '0' and delete several nodes at once.
+    """
+    print("\n36) drop rewrites the pool files, and an index means one node")
+    import tempfile, json
+    from gozar import core_store as store, core_output as out
+    from gozar import ui_pick
+
+    src = (ROOT / "gozar" / "ui_pick.py").read_text()
+    check("drop refreshes the pool files, not just state.json",
+          "refresh_pool" in src)
+    check("an index is resolved before a prefix match",
+          "sid.isdigit()" in src)
+    check("an ambiguous prefix is refused instead of deleting several",
+          "matches %d nodes" in src)
+    check("pick and drop share one definition of the pool files",
+          src.count("refresh_pool") >= 2)
+
+    # behaviour, not text: build a fake pool, delete one, read the files back
+    with tempfile.TemporaryDirectory() as d:
+        d = Path(d)
+        # three nodes with ids that do NOT start with a digit, plus one that does
+        raws = ["ss://YWVzLTI1Ni1nY206cGFzcw==@1.1.1.1:443#a",
+                "ss://YWVzLTI1Ni1nY206cGFzcw==@2.2.2.2:443#b",
+                "ss://YWVzLTI1Ni1nY206cGFzcw==@3.3.3.3:443#c"]
+        state = {}
+        for i, raw in enumerate(raws):
+            from gozar import core_parser as P
+            cfg = P.parse(raw)
+            ident = store.ident(cfg)
+            state[ident] = {"raw": raw, "type": "shadowsocks",
+                            "server": cfg["server"], "server_port": 443,
+                            "successes": 2, "tier": "fast",
+                            "alive_now": True, "target_ok_now": True,
+                            "target_ok": True, "stability": 100,
+                            "last_latency": 100 + i, "latency": 100 + i,
+                            "checks": 2, "last_check": 9_999_999_999}
+        store.save(d / "state.json", state)
+        out.refresh_pool(d, state, {"best_n": 50, "bak_n": 50, "gen_n": 50,
+                                    "targets": ["https://x/"]})
+        before = json.loads((d / "best.json").read_text())
+        check("the pool files start out matching state", len(before) == 3)
+
+        # delete the first one through the same code path `gozar drop` uses
+        ident0 = sorted(state)[0]
+        state.pop(ident0)
+        store.save(d / "state.json", state)
+        out.refresh_pool(d, state, {"best_n": 50, "bak_n": 50, "gen_n": 50,
+                                   "targets": ["https://x/"]})
+        after = json.loads((d / "best.json").read_text())
+        check("after a deletion the pool file has one node fewer",
+              len(after) == 2)
+        check("and the deleted node is gone from it",
+              all(r.get("raw") != raws[0] for r in after))
+        check("state and pool agree",
+              len(after) == len(json.loads((d / "state.json").read_text())))
+
+
+# ─────────────── 37) every command explains how to use it ───────────────
+def t_help_has_examples() -> None:
+    """`-h` printed the flag list and nothing about how to actually use it."""
+    print("\n37) every subcommand's -h ends with runnable examples")
+    import subprocess, sys
+    from gozar.cli import _EXAMPLES
+    from gozar.cli import build_parser
+    import argparse
+    p = build_parser()
+    sub = next(a for a in p._actions if isinstance(a, argparse._SubParsersAction))
+    for name in sub.choices:
+        check(f"`{name}` has examples in its help",
+              bool(_EXAMPLES.get(name)) and "examples:" in
+              (sub.choices[name].description or ""))
+        check(f"`{name}` examples are runnable `gozar {name}` lines",
+              all(e.startswith(f"gozar {name}") for e in _EXAMPLES[name]))
+    # and the real thing, through argparse
+    r = subprocess.run([sys.executable, "-m", "gozar", "drop", "-h"],
+                       capture_output=True, text=True, timeout=120, cwd=str(ROOT))
+    check("-h output is line-broken, not one paragraph",
+          "examples:" in r.stdout and "\n  gozar drop" in r.stdout)
+    check("help no longer calls the tool a bot",
+          "the bot and its dependencies" not in
+          (ROOT / "gozar" / "cli.py").read_text())
+
+
 # ─────────────── 35) the broken-install message must be actionable ─────────────
 def t_broken_install_message() -> None:
     """On 2026-11-29 the launcher explained four causes and stopped there.
@@ -1489,6 +1579,8 @@ def main() -> int:
     t_completions()
     t_dev_launcher()
     t_broken_install_message()
+    t_drop_really_deletes()
+    t_help_has_examples()
     print("\n" + "=" * 70)
     print(f"  PASS: {len(PASSES)}   FAIL: {len(FAILS)}")
     for f in FAILS:
